@@ -1,6 +1,8 @@
 .ipynb_checkpoints
 .vs
 __pycache__
-train_data/
-test_data/
-model/
+*.wav
+*.pt
+*.zip
+*.npy
+wandb/
