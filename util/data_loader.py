@@ -45,6 +45,7 @@ class Utterances(data.Dataset):
                 if j < 2:  # fill in speaker id and embedding
                     uttrs[j] = tmp
                 else:  # load the mel-spectrograms
+                    # 在 twcc 上面用註解的
                     # tmp = tmp.replace("\\","/")
                     # uttrs[j] = np.load(f'{self.root_dir}/{tmp}')
                     uttrs[j] = np.load(os.path.join(self.root_dir, tmp))
