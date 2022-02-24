@@ -7,7 +7,7 @@ class MetaBlock(nn.Module):
     def __init__(
         self,
         dim,
-        source_emb=80,
+        source_emb=88,
         crop_len=176,
         patch_size=8,
         mlp_depth=1,
@@ -67,15 +67,15 @@ class Generator(nn.Module):
     def __init__(
         self,
         crop_len=176,
-        num_mel=80,
+        dim_neck=44,
         num_layers=3,
     ):
         super(Generator, self).__init__()
 
         self.num_layer = num_layers
-        self.metablock = MetaBlock(num_mel)
+        self.metablock = MetaBlock(2 * dim_neck)
         self.conv = ConvNorm(
-            num_mel, crop_len, kernel_size=5, padding=2, w_init_gain="relu"
+            2 * dim_neck, crop_len, kernel_size=5, padding=2, w_init_gain="relu"
         )
         self.adain = AdaIN()
         self.activate = nn.ReLU()
@@ -86,7 +86,7 @@ class Generator(nn.Module):
             patch_size=16,
             dim=crop_len,
             depth=1,
-            out_dim=num_mel,
+            out_dim=2 * dim_neck,
         )
 
     def forward(self, x, embedding):
