@@ -85,3 +85,15 @@ class PatchEmbed(nn.Module):
         x = self.proj(x)
         x = self.norm(x)
         return x
+
+
+class AdaIN(nn.Module):
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+    def forward(self, content, style):
+        size = content.size()
+        norm_feat = (content - content.mean().expand(size)) / (content.std())
+        return (norm_feat * style.std().expand(size)) + style.mean().expand(size)

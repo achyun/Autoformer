@@ -6,4 +6,5 @@ __pycache__
 *.zip
 *.npy
 *pkl
+*.flac
 wandb/
