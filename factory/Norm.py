@@ -68,12 +68,7 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(
-        self,
-        patch_size=5,
-        stride=1,
-        padding=2,
-        in_chans=336,
-        embed_dim=512,
+        self, patch_size=5, stride=1, padding=2, in_chans=336, embed_dim=512,
     ):
         super().__init__()
         self.proj = nn.Conv1d(
@@ -88,9 +83,7 @@ class PatchEmbed(nn.Module):
 
 
 class AdaIN(nn.Module):
-    def __init__(
-        self,
-    ):
+    def __init__(self,):
         super().__init__()
 
     def forward(self, content, style):

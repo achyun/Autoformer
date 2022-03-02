@@ -1,29 +1,27 @@
 import torch.nn as nn
 from .MLPMixer import MLPMixer
-from .Norm import GroupNorm, ConvNorm, AdaIN
+from .Norm import ConvNorm, AdaIN
 
 
 class MetaBlock(nn.Module):
     def __init__(
         self,
-        dim,
-        source_emb=88,
+        dim=88,
         crop_len=176,
         patch_size=8,
         mlp_depth=1,
         conv_activate=nn.ReLU(),
         w_init_gain="relu",
-        norm_layer=GroupNorm,
     ):
 
         super(MetaBlock, self).__init__()
-        self.norm1 = norm_layer(dim)
+
         self.token_mixer = ConvNorm(
-            source_emb, source_emb, kernel_size=5, padding=2, w_init_gain=w_init_gain
+            dim, dim, kernel_size=5, padding=2, w_init_gain=w_init_gain
         )
-        self.norm2 = norm_layer(crop_len)
+
         self.conv_1 = ConvNorm(
-            source_emb, crop_len, kernel_size=5, padding=2, w_init_gain=w_init_gain
+            dim, crop_len, kernel_size=5, padding=2, w_init_gain=w_init_gain
         )
         self.mlp = MLPMixer(
             image_size=crop_len,
@@ -31,14 +29,10 @@ class MetaBlock(nn.Module):
             patch_size=patch_size,
             dim=crop_len,
             depth=mlp_depth,
-            out_dim=source_emb,
+            out_dim=dim,
         )
         self.conv_2 = ConvNorm(
-            source_emb,
-            source_emb,
-            kernel_size=5,
-            padding=2,
-            w_init_gain=w_init_gain,
+            dim, dim, kernel_size=5, padding=2, w_init_gain=w_init_gain,
         )
         self.activate = conv_activate
         self.adain = AdaIN()
@@ -46,7 +40,8 @@ class MetaBlock(nn.Module):
     def forward(self, x, embedding):
 
         # Part1 --- Token Mixer
-        x = x + self.token_mixer(self.norm1(x))
+        x = x.transpose(1, 2)
+        x = x + self.token_mixer(x)
         x = self.adain(x, embedding)
         x = self.activate(x)
         # Part2 --- Middle Conv
@@ -54,21 +49,18 @@ class MetaBlock(nn.Module):
         x_after_conv_1 = self.adain(x_after_conv_1, embedding)
         x_after_conv_1 = self.activate(x_after_conv_1)
         # Part3 --- MLP
-        x_mlp = self.mlp(self.norm2(x_after_conv_1).unsqueeze(1))
+        x_mlp = self.mlp(x_after_conv_1.unsqueeze(1))
         # Part4 --- Last Conv
         x_after_conv_2 = self.conv_2(x_mlp)
         x_after_conv_2 = self.adain(x_after_conv_2, embedding)
         x_after_conv_2 = self.activate(x_after_conv_2)
 
-        return x + x_after_conv_2
+        return (x + x_after_conv_2).transpose(1, 2)
 
 
 class Generator(nn.Module):
     def __init__(
-        self,
-        crop_len=176,
-        dim_neck=44,
-        num_layers=3,
+        self, crop_len=176, dim_neck=44, out_mel=80, num_layers=3,
     ):
         super(Generator, self).__init__()
 
@@ -86,14 +78,19 @@ class Generator(nn.Module):
             patch_size=16,
             dim=crop_len,
             depth=1,
-            out_dim=2 * dim_neck,
+            out_dim=out_mel,
         )
 
     def forward(self, x, embedding):
+        # x --- (b,176,2*dim_neck)
         for _ in range(self.num_layer):
             x = self.metablock(x, embedding)
-        x = self.conv(x)
+        # (b,176,88)
+        x = self.conv(x.transpose(1, 2))
+        # (b,176,176)
         x = self.adain(x, embedding)
         x = self.activate(x)
-        x = self.mlp(x.unsqueeze(1))
+        x = self.mlp(x.unsqueeze(1)).transpose(1, 2)
+        # (b,176,80)
+
         return x

@@ -10,10 +10,9 @@ from multiprocessing import Process, Manager
 class Utterances(data.Dataset):
     """Dataset class for the Utterances dataset."""
 
-    def __init__(self, root_dir, len_crop):
+    def __init__(self, root_dir):
         """Initialize and preprocess the Utterances dataset."""
         self.root_dir = root_dir
-        self.len_crop = len_crop
         self.step = 10
 
         metaname = os.path.join(self.root_dir, "train.pkl")
@@ -36,7 +35,7 @@ class Utterances(data.Dataset):
         self.train_dataset = list(dataset)
         self.num_tokens = len(self.train_dataset)
 
-        print("Finished loading the dataset...")
+        print("Finished loading the style dataset...")
 
     def load_data(self, submeta, dataset, idx_offset):
         for k, sbmt in enumerate(submeta):
@@ -44,44 +43,25 @@ class Utterances(data.Dataset):
             for j, tmp in enumerate(sbmt):
                 if j < 2:  # fill in speaker id and embedding
                     uttrs[j] = tmp
-                else:  # load the mel-spectrograms
-                    # 在 twcc 上面用註解的
-                    #tmp = tmp.replace("\\", "/")
-                    #uttrs[j] = np.load(f"{self.root_dir}/{tmp}")
-                    uttrs[j] = np.load(os.path.join(self.root_dir, tmp))
             dataset[idx_offset + k] = uttrs
 
     def __getitem__(self, index):
         # pick a random speaker
         dataset = self.train_dataset
         list_uttrs = dataset[index]
-        emb_org = list_uttrs[1]
-
-        # pick random uttr with random crop
-        a = np.random.randint(2, len(list_uttrs))
-        tmp = list_uttrs[a]
-        if tmp.shape[0] < self.len_crop:
-            len_pad = self.len_crop - tmp.shape[0]
-            uttr = np.pad(tmp, ((0, len_pad), (0, 0)), "constant")
-        elif tmp.shape[0] > self.len_crop:
-            left = np.random.randint(tmp.shape[0] - self.len_crop)
-            uttr = tmp[left : left + self.len_crop, :]
-        else:
-            uttr = tmp
-
-        return uttr, emb_org
+        return list_uttrs[1]
 
     def __len__(self):
         """Return the number of spkrs."""
         return self.num_tokens
 
 
-def get_loader(root_dir, dim_neck=44, batch_size=2, len_crop=176, num_workers=0):
+def get_style_loader(root_dir, batch_size=2, num_workers=0):
     """Build and return a data loader."""
 
-    dataset = Utterances(root_dir, len_crop)
+    dataset = Utterances(root_dir)
 
-    worker_init_fn = lambda x: np.random.seed((torch.initial_seed()) % (2 ** dim_neck))
+    worker_init_fn = lambda x: np.random.seed((torch.initial_seed()) % (2 ** 44))
     data_loader = data.DataLoader(
         dataset=dataset,
         batch_size=batch_size,

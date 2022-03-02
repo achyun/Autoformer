@@ -169,9 +169,9 @@ class Postnet(nn.Module):
         return x
 
 
-class AutoVC_Adjust(nn.Module):
+class AutoVC_Gan(nn.Module):
     def __init__(self, dim_neck, dim_emb, dim_pre, freq):
-        super(AutoVC_Adjust, self).__init__()
+        super(AutoVC_Gan, self).__init__()
         self.encoder = Encoder(dim_neck, dim_emb, freq)
         self.decoder = Decoder(dim_neck, dim_emb, dim_pre)
         self.postnet = Postnet()
@@ -183,11 +183,12 @@ class AutoVC_Adjust(nn.Module):
         emb = emb.unsqueeze(-1).expand(-1, -1, x.size(-1))
         return torch.cat((x, emb), dim=1)
 
-    def get_code(self, x, c_org):
-        # adjust speaker embedding for encoder, during traning c_org is equal to c_trg
-        c_org = self.adjust(self.concatenate(x, c_org))
-        # Notice! Here is original x with adjust speaker embedding
-        return self.encoder(x, c_org)
+    def get_code(self, x, c_org, use_adjust):
+        if use_adjust:
+            # adjust speaker embedding for encoder, during traning c_org is equal to c_trg
+            c_org = self.adjust(self.concatenate(x, c_org))
+            # Notice! Here is original x with adjust speaker embedding
+        return self.encoder(x, c_org), c_org
 
     def get_content_with_code(self, codes, size):
         tmp = []
@@ -204,9 +205,9 @@ class AutoVC_Adjust(nn.Module):
         mel_outputs_postnet = mel_outputs_postnet.unsqueeze(1)
         return mel_outputs, mel_outputs_postnet
 
-    def forward(self, x, c_org, c_trg):
+    def forward(self, x, c_org, c_trg, use_adjust=False):
 
-        codes = self.get_code(x, c_org)
+        codes, c_org = self.get_code(x, c_org, use_adjust)
         if c_trg is None:
             return torch.cat(codes, dim=-1)
         else:
