@@ -189,8 +189,7 @@ class Solver(object):
                 print(log)
 
             if (i + 2) % self.log_step == 0:
-                pass
-                # os.system("cls||clear")
+                os.system("cls||clear")
 
 
 class Config:
@@ -210,7 +209,7 @@ class Config:
         self.dim_emb = 256
         self.dim_pre = 512
         self.freq = 22
-        self.log_step = 1
+        self.log_step = 10
 
 
 if __name__ == "__main__":

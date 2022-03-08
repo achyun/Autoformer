@@ -179,7 +179,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_model_name")
     parser.add_argument("--use_pretrained_weight", default=0)
     parser.add_argument("--pretrained_weight_path", default="")
-    parser.add_argument("--num_iters", default=200000, help="iter time")
+    parser.add_argument("--num_iters", default=1000000, help="iter time")
     args = parser.parse_args()
 
     config = Config(

@@ -69,7 +69,7 @@ class Utterances(data.Dataset):
         else:
             uttr = tmp
 
-        return list_uttrs[0], uttr, emb_org
+        return uttr, emb_org
 
     def __len__(self):
         """Return the number of spkrs."""
