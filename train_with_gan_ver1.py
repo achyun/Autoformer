@@ -1,6 +1,6 @@
-from cProfile import label
 import importlib
 import time
+from traceback import print_tb
 import torch
 import datetime
 import torch.nn.functional as F
@@ -40,16 +40,19 @@ class Solver(object):
         # Training configurations.
         self.batch_size = config.batch_size
         self.num_iters = config.num_iters
+        self.pretrained_step = config.pretrained_step
         self.pretrained_embedder_path = "model/static/metadv_vctk80.pth"
-
+        
         # Miscellaneous.
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
+        self.cosin_label = torch.ones(self.batch_size).to(self.device)
         self.log_step = config.log_step
         self.log_keys = [
             "VC/loss_id",
             "VC/loss_id_psnt",
             "VC/loss_cd",
+            "A/loss_adjust_reconst",
             "A/loss_adjust",
             "C/loss_trans",
             "D/loss",
@@ -100,6 +103,15 @@ class Solver(object):
         style = style.to(self.device)
         return x, style
 
+    def print_log(self,loss,i,start_time):
+        et = time.time() - start_time
+        et = str(datetime.timedelta(seconds=et))[:-7]
+        log = "Elapsed [{}], Iteration [{}/{}]".format(et, i + 1, self.num_iters)
+        for tag in self.log_keys:
+            log += ", {}: {:.4f}".format(tag, loss[tag])
+        print(log)
+
+
     def train(self):
 
         print("Start training...")
@@ -110,7 +122,7 @@ class Solver(object):
             self.C = self.C.train()
             self.D = self.D.train()
 
-            _, x_identic, x_identic_psnt, code_real = self.VC(
+            org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
                 x_source, org_style, org_style
             )
             code_reconst = self.VC(x_identic_psnt, org_style, None)
@@ -119,9 +131,11 @@ class Solver(object):
             vc_loss_id_psnt = F.mse_loss(x_source, x_identic_psnt.squeeze())
             # Code semantic loss.
             vc_loss_cd = F.l1_loss(code_real, code_reconst)
-            autovc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd
-
-            if (i + 1) % self.n_critic == 0:
+            # Adjust Speaker embedding loss
+            a_loss_adjust_reconst = F.l1_loss(org_style_adjust, org_style)
+            autovc_adjust_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd + a_loss_adjust_reconst
+           
+            if (i + 1) % self.n_critic == 0 and (i+1) > self.pretrained_step:
                 x_target, target_style = self.get_data()
                 org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
                     x_source, org_style, target_style, True, x_target
@@ -131,16 +145,18 @@ class Solver(object):
                 # x_target 是 Real Data
                 real_prob = self.D(x_target)
                 fake_prob = self.D(x_identic_psnt.squeeze())
-
+                # Cosine Embedding Loss 接近 0.1 時就代表轉換的不錯了
                 # Adjust Speaker embedding loss
-                a_loss_adjust = F.l1_loss(org_style_adjust, org_style)
+                # a_loss_adjust = F.l1_loss(org_style_adjust, org_style)
+                a_loss_adjust = F.cosine_embedding_loss(org_style_adjust, org_style,self.cosin_label)
                 # Classifier loss
-                c_loss_trans = F.l1_loss(trans_style, target_style)
+                # c_loss_trans = F.l1_loss(trans_style, target_style)
+                c_loss_trans = F.cosine_embedding_loss(trans_style, target_style,self.cosin_label)
                 # Discriminator loss
                 d_loss = self.discriminator_loss(real_prob, fake_prob)
 
                 autovc_gan_loss = (
-                    autovc_loss
+                    autovc_adjust_loss
                     + self.lambda_ad * a_loss_adjust
                     + self.lambda_cls * c_loss_trans
                     + self.lambda_dis * d_loss
@@ -153,40 +169,50 @@ class Solver(object):
 
             else:
                 self.reset_grad()
-                autovc_loss.backward()
+                autovc_adjust_loss.backward()
                 self.vc_optimizer.step()
 
-            # Logging
-            loss = {}
-            loss["VC/loss_id"] = vc_loss_id.item()
-            loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
-            loss["VC/loss_cd"] = vc_loss_cd.item()
-            loss["A/loss_adjust"] = a_loss_adjust.item()
-            loss["C/loss_trans"] = c_loss_trans.item()
-            loss["D/loss"] = d_loss.item()
 
-            if (i + 1) % self.log_step == 0:
+            if (i+1) > self.pretrained_step and ( i + 1) % self.log_step == 0:
+                loss = {}
+                loss["VC/loss_id"] = vc_loss_id.item()
+                loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
+                loss["VC/loss_cd"] = vc_loss_cd.item()
+                loss["A/loss_adjust_reconst"] = a_loss_adjust_reconst.item()
+                loss["A/loss_adjust"] = a_loss_adjust.item()
+                loss["C/loss_trans"] = c_loss_trans.item()
+                loss["D/loss"] = d_loss.item()
+                wandb.log(
+                                        {
+                                            "VC_LOSS_ID": vc_loss_id.item(),
+                                            "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
+                                            "VC_LOSS_CD": vc_loss_cd.item(),
+                                            "A/LOSS_ADJUST_RECONST":a_loss_adjust_reconst.item(),
+                                             "A/LOSS_ADJUST":a_loss_adjust.item(),
+                                             "C/LOSS_TRANS":c_loss_trans.item(),
+                                             "D/LOSS":d_loss.item()
+                                        }
+                                    )
+                self.print_log(loss,i,start_time)
 
+            elif (i + 1) % self.log_step == 0:
+                loss = {}
+                loss["VC/loss_id"] = vc_loss_id.item()
+                loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
+                loss["VC/loss_cd"] = vc_loss_cd.item()
+                loss["A/loss_adjust_reconst"] = a_loss_adjust_reconst.item()
+                loss["A/loss_adjust"] = 0.0
+                loss["C/loss_trans"] = 0.0
+                loss["D/loss"] = 0.0
                 wandb.log(
                     {
                         "VC_LOSS_ID": vc_loss_id.item(),
                         "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
                         "VC_LOSS_CD": vc_loss_cd.item(),
-                        "A/loss_adjust": a_loss_adjust.item(),
-                        "C/loss_trans": c_loss_trans.item(),
-                        "D/loss": d_loss.item(),
+                        "A/LOSS_ADJUST_RECONST":a_loss_adjust_reconst.item(),
                     }
                 )
-
-                et = time.time() - start_time
-                et = str(datetime.timedelta(seconds=et))[:-7]
-                log = "Elapsed [{}], Iteration [{}/{}]".format(
-                    et, i + 1, self.num_iters
-                )
-
-                for tag in self.log_keys:
-                    log += ", {}: {:.4f}".format(tag, loss[tag])
-                print(log)
+                self.print_log(loss,i,start_time)
 
             if (i + 2) % self.log_step == 0:
                 os.system("cls||clear")
@@ -197,12 +223,13 @@ class Config:
         self.model_name = model_name
         self.data_dir = data_dir
         self.num_iters = num_iters
+        self.pretrained_step = int(num_iters/10)
         self.num_speaker = 80
         self.lambda_cd = 1
-        self.lambda_ad = 1
-        self.lambda_cls = 10
+        self.lambda_ad = 0.1
+        self.lambda_cls = 0.1
         self.lambda_dis = 1
-        self.n_critic = 1
+        self.n_critic = 10
         self.batch_size = 2
         self.len_crop = 176
         self.dim_neck = 44
@@ -217,10 +244,19 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", help="traning model name")
     parser.add_argument("--data_dir", help="traning data folder")
     parser.add_argument("--save_model_name")
-    parser.add_argument("--num_iters", default=1, help="iter time")
+    parser.add_argument("--num_iters", default=1000000, help="iter time")
     args = parser.parse_args()
 
     config = Config(args.model_name, args.data_dir, int(args.num_iters))
+
+    print(" --- Use Config  ---")
+    print(f" Lambda cd ---  {config.lambda_cd}")
+    print(f" Lambda ad --- {config.lambda_ad}")
+    print(f" Lambda cls --- {config.lambda_cls}")
+    print(f" Lambda dis--- {config.lambda_dis}")
+    print(f" N critic --- {config.n_critic }")
+    print(f" VC Pretrained step  --- {config.pretrained_step  }")
+    print(" ----------------------") 
 
     ### Init Wandb
     wandb.init(project=f'AutoVC {datetime.date.today().strftime("%b %d")}')

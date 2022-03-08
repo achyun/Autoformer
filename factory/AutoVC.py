@@ -104,7 +104,8 @@ class Decoder(nn.Module):
 
 
 class Postnet(nn.Module):
-    """Postnet
+    """
+    Postnet
     - Five 1-d convolution with 512 channels and kernel size 5
     """
 
