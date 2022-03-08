@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .Norm import ConvNorm, LinearNorm
@@ -23,11 +24,16 @@ class Adjust(nn.Module):
             )
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
-
         self.lstm = nn.LSTM(512, hidden_size=dim_cell, num_layers=3, batch_first=True)
         self.embedding = LinearNorm(dim_cell, 256)
 
-    def forward(self, x):
+    def concatenate(self, x, emb):
+        x = x.squeeze(1).transpose(2, 1)
+        emb = emb.unsqueeze(-1).expand(-1, -1, x.size(-1))
+        return torch.cat((x, emb), dim=1)
+
+    def forward(self, x, emb):
+        x = self.concatenate(x, emb)
         for conv in self.convolutions:
             x = F.relu(conv(x))
         x = x.transpose(1, 2)

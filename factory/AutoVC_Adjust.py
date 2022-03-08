@@ -161,9 +161,7 @@ class Postnet(nn.Module):
     def forward(self, x):
         for i in range(len(self.convolutions) - 1):
             x = torch.tanh(self.convolutions[i](x))
-
         x = self.convolutions[-1](x)
-
         return x
 
 
@@ -175,23 +173,19 @@ class AutoVC_Adjust(nn.Module):
         self.postnet = Postnet()
         self.adjust = Adjust(dim_emb)
 
-    def concatenate(self, x, emb):
-        x = x.squeeze(1).transpose(2, 1)
-        emb = emb.unsqueeze(-1).expand(-1, -1, x.size(-1))
-        return torch.cat((x, emb), dim=1)
+    def forward(self, x, c_org, c_trg, isConvert=False, x_target=None):
 
-    def forward(self, x, c_org, c_trg):
-        x_s = self.concatenate(x, c_org)
-        # adjust speaker embedding for encoder, during traning c_org is equal to c_trg
-        c_org = self.adjust(x_s)
-        # Notice! Here is original x with adjust speaker embedding
+        c_org = self.adjust(x, c_org)
         codes = self.encoder(x, c_org)
 
         if c_trg is None:
             return torch.cat(codes, dim=-1)
+        elif isConvert:
+            c_trg = self.adjust(x_target, c_trg)
         else:
-            x_t = self.concatenate(x, c_trg)
-            c_trg = self.adjust(x_t)
+            # In training，c_trg is same to c_org
+            # In conversion， you should put target mel its embedding
+            c_trg = self.adjust(x, c_trg)
 
         tmp = []
         for code in codes:
