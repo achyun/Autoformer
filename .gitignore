@@ -8,4 +8,5 @@ __pycache__
 *pkl
 *.flac
 *.mp3
+*.pth
 wandb/

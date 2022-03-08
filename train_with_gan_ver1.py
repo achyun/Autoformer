@@ -1,7 +1,6 @@
+from cProfile import label
 import importlib
-from re import S, X
 import time
-from sympy import im
 import torch
 import datetime
 import torch.nn.functional as F
@@ -10,22 +9,20 @@ import os
 import argparse
 from torch.backends import cudnn
 from util.data_loader import get_loader
-from util.style_loader import get_style_loader
 from factory.Discriminator import Discriminator
-from factory.LstmDV import LstmDV
+from factory.MetaDV import MetaDV
 
 
 class Solver(object):
     """
-    AutoVC 加上 Adjust Speaker Embedding + Gan
+    AutoVC + Adjust Speaker Embedding + Gan
     """
 
-    def __init__(self, vcc_loader, style_loader, config):
+    def __init__(self, vcc_loader, config):
         """Initialize configurations."""
 
         # Data loader and All Speaker style
         self.vcc_loader = vcc_loader
-        self.style_loader = style_loader
 
         # Model configurations.
         self.lambda_cd = config.lambda_cd
@@ -38,16 +35,25 @@ class Solver(object):
         self.freq = config.freq
         self.n_critic = config.n_critic
         self.model_name = config.model_name
-        self.use_adjust = config.use_adjust
+        self.num_speaker = config.num_speaker
 
         # Training configurations.
         self.batch_size = config.batch_size
         self.num_iters = config.num_iters
+        self.pretrained_embedder_path = "model/static/metadv_vctk80.pth"
 
         # Miscellaneous.
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
         self.log_step = config.log_step
+        self.log_keys = [
+            "VC/loss_id",
+            "VC/loss_id_psnt",
+            "VC/loss_cd",
+            "A/loss_adjust",
+            "C/loss_trans",
+            "D/loss",
+        ]
 
         # Build the model.
         self.build_model()
@@ -57,21 +63,19 @@ class Solver(object):
         self.VC = getattr(
             importlib.import_module(f"factory.{self.model_name}"), self.model_name
         )(self.dim_neck, self.dim_emb, self.dim_pre, self.freq)
-
         self.vc_optimizer = torch.optim.Adam(self.VC.parameters(), 0.0001)
         self.VC.to(self.device)
 
-        # 這個是拿來分類轉換後聲音的，算 speaker embedding 之間的 cos-similiarty
-        self.C = LstmDV(self.dim_emb)
+        # 拿來分類轉換後聲音的，算 speaker embedding 之間的 cos-similiarty 或 MSE
+        self.C = MetaDV(self.num_speaker)
+        print(f"Load Pretrained Embedder from --- {self.pretrained_embedder_path}")
+        self.C.load_state_dict(
+            torch.load(self.pretrained_embedder_path, map_location=self.device)
+        )
         self.c_optimizer = torch.optim.Adam(self.C.parameters(), 0.0001)
         self.C.to(self.device)
 
-        # 拿 VC 生成的 mel 進 Generator 跟不同的 speaker embedding 生成新的聲音
-        self.G = Generator()
-        self.g_optimizer = torch.optim.Adam(self.G.parameters(), 0.0001)
-        self.G.to(self.device)
-
-        # 判斷重建後的聲音真假
+        # 判斷聲音真假
         self.D = Discriminator()
         self.d_optimizer = torch.optim.Adam(self.D.parameters(), 0.0001)
         self.D.to(self.device)
@@ -79,7 +83,6 @@ class Solver(object):
     def reset_grad(self):
         self.vc_optimizer.zero_grad()
         self.c_optimizer.zero_grad()
-        self.g_optimizer.zero_grad()
         self.d_optimizer.zero_grad()
 
     def discriminator_loss(self, real, fake):
@@ -87,163 +90,107 @@ class Solver(object):
         fake_loss = torch.nn.BCELoss()(fake, torch.zeros_like(fake))
         return real_loss + fake_loss
 
-    def train(self):
+    def get_data(self):
+        try:
+            x, style = next(data_iter)
+        except:
+            data_iter = iter(self.vcc_loader)
+            x, style = next(data_iter)
+        x = x.to(self.device)
+        style = style.to(self.device)
+        return x, style
 
-        data_loader = self.vcc_loader
-        style_loader = self.style_loader
-        keys = [
-            "G/loss_id",
-            "G/loss_id_psnt",
-            "G/loss_cd",
-            "C/loss_trans",
-            "C/loss_reconst",
-            "D/loss",
-        ]
+    def train(self):
 
         print("Start training...")
         start_time = time.time()
         for i in range(self.num_iters):
-
-            # =================================================================================== #
-            #                             1. Preprocess input data                                #
-            # =================================================================================== #
-
-            # Fetch data.
-            try:
-                x_real, org_style = next(data_iter)
-            except:
-                data_iter = iter(data_loader)
-                x_real, org_style = next(data_iter)
-
-            try:
-                target_style = next(style_loader)
-            except:
-                style_iter = iter(style_loader)
-                target_style = next(style_iter)
-
-            x_real = x_real.to(self.device)
-            org_style = org_style.to(self.device)
-            target_style = target_style.to(self.device)
-            # =================================================================================== #
-            #                       2. Train the VC and Generator                                 #
-            # =================================================================================== #
+            x_source, org_style = self.get_data()
             self.VC = self.VC.train()
             self.C = self.C.train()
-            self.G = self.G.train()
             self.D = self.D.train()
-            org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
-                x_real, org_style, org_style
+
+            _, x_identic, x_identic_psnt, code_real = self.VC(
+                x_source, org_style, org_style
             )
             code_reconst = self.VC(x_identic_psnt, org_style, None)
             # Identity mapping loss
-            vc_loss_id = F.mse_loss(x_real, x_identic.squeeze())
-            vc_loss_id_psnt = F.mse_loss(x_real, x_identic_psnt.squeeze())
+            vc_loss_id = F.mse_loss(x_source, x_identic.squeeze())
+            vc_loss_id_psnt = F.mse_loss(x_source, x_identic_psnt.squeeze())
             # Code semantic loss.
-            g_loss_cd = F.l1_loss(code_real, code_reconst)
-
-            if self.use_adjust:
-                # Adjust Speaker embedding loss
-                a_loss_adjust = F.cosine_embedding_loss(
-                    org_style_adjust, org_style, torch.tensor([1, 1])
-                )
-                vc_loss = (
-                    vc_loss_id
-                    + vc_loss_id_psnt
-                    + self.lambda_cd * g_loss_cd
-                    + self.lambda_ad * a_loss_adjust
-                )
-            else:
-                vc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * g_loss_cd
-            self.reset_grad()
-            vc_loss.backward()
-            self.vc_optimizer.step()
+            vc_loss_cd = F.l1_loss(code_real, code_reconst)
+            autovc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd
 
             if (i + 1) % self.n_critic == 0:
-                print(f"Now -- Gan")
-                # 用 Encoder 把 VC 自己轉自己的聲音萃取出只有 content 的內容 -> (Batch_size,Crop_len,2*dim_neck)
-                x = x_identic_psnt.squeeze(1)
-                size = x.size(1)
-                source_codes, _ = self.VC.get_code(x, org_style, False)
-                source_content = self.VC.get_content_with_code(source_codes, size)
-
-                # Build Voice with Source Content and Target style --> (b,crop_len,mel)
-                trans_voice = self.G(source_content, target_style)
-
-                # 用 Encoder 把 Generator 轉換出來的聲音萃取出只有 content 的內容 -> (Batch_size,Crop_len,2*dim_neck)
-                trans_codes, _ = self.VC.get_code(trans_voice, target_style, False)
-                trans_content = self.VC.get_content_with_code(trans_codes, size)
-
-                # Recontruct Voice with Trans Content and Org style --> (b,crop_len,mel)
-                reconstruct_voice = self.G(trans_content, org_style)
-
+                x_target, target_style = self.get_data()
+                org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
+                    x_source, org_style, target_style, True, x_target
+                )
                 # 抽出 style
-                trans_style = self.C(trans_voice)
-                reconstruct_style = self.C(reconstruct_voice)
+                _, trans_style = self.C(x_identic_psnt.squeeze())
+                # x_target 是 Real Data
+                real_prob = self.D(x_target)
+                fake_prob = self.D(x_identic_psnt.squeeze())
 
-                # Prob
-                real_prob = self.D(x_real)
-                fake_prob = self.D(reconstruct_voice.squeeze())
-
+                # Adjust Speaker embedding loss
+                a_loss_adjust = F.l1_loss(org_style_adjust, org_style)
                 # Classifier loss
-                c_loss_trans = F.cosine_embedding_loss(
-                    trans_style, target_style, torch.tensor([1, 1])
-                )
-                c_loss_recontruct = F.cosine_embedding_loss(
-                    reconstruct_style, org_style, torch.tensor([1, 1])
-                )
+                c_loss_trans = F.l1_loss(trans_style, target_style)
                 # Discriminator loss
                 d_loss = self.discriminator_loss(real_prob, fake_prob)
-                g_loss = (
-                    self.lambda_cls * c_loss_trans
-                    + self.lambda_cls * c_loss_recontruct
+
+                autovc_gan_loss = (
+                    autovc_loss
+                    + self.lambda_ad * a_loss_adjust
+                    + self.lambda_cls * c_loss_trans
                     + self.lambda_dis * d_loss
                 )
                 self.reset_grad()
-                g_loss.backward()
-                self.g_optimizer.step()
+                autovc_gan_loss.backward()
+                self.vc_optimizer.step()
                 self.c_optimizer.step()
                 self.d_optimizer.step()
-                loss["C/loss_trans"] = c_loss_trans.item()
-                loss["C/loss_reconst"] = c_loss_recontruct.item()
-                loss["D/loss"] = d_loss.item()
-                print("Checkpoint")
-            # Logging for VC.
+
+            else:
+                self.reset_grad()
+                autovc_loss.backward()
+                self.vc_optimizer.step()
+
+            # Logging
             loss = {}
             loss["VC/loss_id"] = vc_loss_id.item()
             loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
-            loss["VC/loss_cd"] = g_loss_cd.item()
-
-            # =================================================================================== #
-            #                               4. Print Traning Info                                 #
-            # =================================================================================== #
+            loss["VC/loss_cd"] = vc_loss_cd.item()
+            loss["A/loss_adjust"] = a_loss_adjust.item()
+            loss["C/loss_trans"] = c_loss_trans.item()
+            loss["D/loss"] = d_loss.item()
 
             if (i + 1) % self.log_step == 0:
-                """
+
                 wandb.log(
                     {
-                        "G_LOSS_ID": vc_loss_id.item(),
-                        "G_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
-                        "G_LOSS_CD": g_loss_cd.item(),
-                        "A_LOSS_Adjust": a_loss_adjust.item(),
-                        "C_LOSS_TRANS": c_loss_trans.item(),
-                        "C_LOSS_RECONST": c_loss_recontruct.item(),
-                        "D_LOSS": d_loss.item(),
+                        "VC_LOSS_ID": vc_loss_id.item(),
+                        "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
+                        "VC_LOSS_CD": vc_loss_cd.item(),
+                        "A/loss_adjust": a_loss_adjust.item(),
+                        "C/loss_trans": c_loss_trans.item(),
+                        "D/loss": d_loss.item(),
                     }
                 )
-                wandb.save("autovc_org.pt")
-                """
+
                 et = time.time() - start_time
                 et = str(datetime.timedelta(seconds=et))[:-7]
                 log = "Elapsed [{}], Iteration [{}/{}]".format(
                     et, i + 1, self.num_iters
                 )
 
-                for tag in keys:
+                for tag in self.log_keys:
                     log += ", {}: {:.4f}".format(tag, loss[tag])
                 print(log)
 
             if (i + 2) % self.log_step == 0:
-                os.system("cls||clear")
+                pass
+                # os.system("cls||clear")
 
 
 class Config:
@@ -251,10 +198,10 @@ class Config:
         self.model_name = model_name
         self.data_dir = data_dir
         self.num_iters = num_iters
-        self.use_adjust = False
+        self.num_speaker = 80
         self.lambda_cd = 1
         self.lambda_ad = 1
-        self.lambda_cls = 0.1
+        self.lambda_cls = 10
         self.lambda_dis = 1
         self.n_critic = 1
         self.batch_size = 2
@@ -277,7 +224,6 @@ if __name__ == "__main__":
     config = Config(args.model_name, args.data_dir, int(args.num_iters))
 
     ### Init Wandb
-    """
     wandb.init(project=f'AutoVC {datetime.date.today().strftime("%b %d")}')
     wandb.run.name = args.model_name
     wandb.run.save()
@@ -287,7 +233,7 @@ if __name__ == "__main__":
     w_config.dim_emb = config.dim_emb
     w_config.freq = config.freq
     w_config.batch_size = config.batch_size
-    """
+
     # 加速 conv，conv 的輸入 size 不會變的話開這個會比較快
     cudnn.benchmark = True
     # Data loader.
@@ -297,7 +243,6 @@ if __name__ == "__main__":
         batch_size=config.batch_size,
         len_crop=config.len_crop,
     )
-    style_loader = get_style_loader(config.data_dir, batch_size=config.batch_size)
-    solver = Solver(vcc_loader, style_loader, config)
+    solver = Solver(vcc_loader, config)
     solver.train()
-    torch.save(solver.G.state_dict(), f"{args.save_model_name}.pt")
+    torch.save(solver.VC.state_dict(), f"{args.save_model_name}.pt")

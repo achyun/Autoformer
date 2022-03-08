@@ -46,8 +46,8 @@ class Utterances(data.Dataset):
                     uttrs[j] = tmp
                 else:  # load the mel-spectrograms
                     # 在 twcc 上面用註解的
-                    #tmp = tmp.replace("\\", "/")
-                    #uttrs[j] = np.load(f"{self.root_dir}/{tmp}")
+                    # tmp = tmp.replace("\\", "/")
+                    # uttrs[j] = np.load(f"{self.root_dir}/{tmp}")
                     uttrs[j] = np.load(os.path.join(self.root_dir, tmp))
             dataset[idx_offset + k] = uttrs
 
@@ -69,7 +69,7 @@ class Utterances(data.Dataset):
         else:
             uttr = tmp
 
-        return uttr, emb_org
+        return list_uttrs[0], uttr, emb_org
 
     def __len__(self):
         """Return the number of spkrs."""
