@@ -5,7 +5,7 @@ from .Norm import ConvNorm, AdaIN
 
 class MetaBlock(nn.Module):
     def __init__(
-        self, mel_dim=80, crop_len=176, patch_size=8, mlp_depth=1, w_init_gain="relu",
+        self, mel_dim, crop_len=176, patch_size=8, mlp_depth=1, w_init_gain="relu",
     ):
 
         super(MetaBlock, self).__init__()
@@ -51,7 +51,7 @@ class Patcher(nn.Module):
         super(Patcher, self).__init__()
 
         self.num_layer = num_layers
-        self.metablock = MetaBlock()
+        self.metablock = MetaBlock(mel_dim=out_mel)
 
         self.mlp = MLPMixer(
             image_size=crop_len,
