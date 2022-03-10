@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class LstmDV(nn.Module):
     """
-    This is for Gan Training Use
+    For Gan Training Use
     """
 
     def __init__(self, num_layers=3, dim_input=80, dim_cell=768, dim_emb=256):

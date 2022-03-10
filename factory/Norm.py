@@ -1,6 +1,5 @@
 import torch.nn as nn
 
-
 class ConvNorm(nn.Module):
     def __init__(
         self,

@@ -1,3 +1,14 @@
+"""
+@inproceedings{qian2019autovc,
+  title={Autovc: Zero-shot voice style transfer with only autoencoder loss},
+  author={Qian, Kaizhi and Zhang, Yang and Chang, Shiyu and Yang, Xuesong and Hasegawa-Johnson, Mark},
+  booktitle={International Conference on Machine Learning},
+  pages={5210--5219},
+  year={2019},
+  organization={PMLR}
+}
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

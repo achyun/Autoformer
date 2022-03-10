@@ -1,3 +1,13 @@
+"""
+@misc{tolstikhin2021mlpmixer,
+    title   = {MLP-Mixer: An all-MLP Architecture for Vision},
+    author  = {Ilya Tolstikhin and Neil Houlsby and Alexander Kolesnikov and Lucas Beyer and Xiaohua Zhai and Thomas Unterthiner and Jessica Yung and Daniel Keysers and Jakob Uszkoreit and Mario Lucic and Alexey Dosovitskiy},
+    year    = {2021},
+    eprint  = {2105.01601},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+"""
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 from functools import partial
@@ -58,12 +68,7 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(
-        self,
-        patch_size=5,
-        stride=1,
-        padding=2,
-        in_chans=336,
-        embed_dim=512,
+        self, patch_size=5, stride=1, padding=2, in_chans=336, embed_dim=512,
     ):
         super().__init__()
         self.proj = nn.Conv1d(
