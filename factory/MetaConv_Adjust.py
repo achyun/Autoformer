@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from .Adjust import Adjust
 from .MLPMixer import MLPMixer
 from .Norm import GroupNorm, ConvNorm, LinearNorm, PatchEmbed
 
@@ -243,18 +244,23 @@ class Postnet(nn.Module):
         return x
 
 
-class MetaConv(nn.Module):
-    def __init__(self, dim_neck, dim, dim_pre, freq):
-        super(MetaConv, self).__init__()
+class MetaConv_Adjust(nn.Module):
+    def __init__(self, dim_neck, dim_emb, dim_pre, freq):
+        super(MetaConv_Adjust, self).__init__()
         self.encoder = Encoder(dim_neck, freq, dim_pre)
         self.decoder = Decoder(dim_pre)
         self.postnet = Postnet()
+        self.adjust = Adjust(dim_emb)
 
-    def forward(self, x, c_org, c_trg):
-
+    def forward(self, x, c_org, c_trg, isConvert=False, x_target=None):
+        c_org = self.adjust(x, c_org)
         codes = self.encoder(x, c_org)
         if c_trg is None:
             return torch.cat(codes, dim=-1)
+        elif isConvert:
+            c_trg = self.adjust(x_target, c_trg)
+        else:
+            c_trg = self.adjust(x, c_trg)
 
         tmp = []
         for code in codes:

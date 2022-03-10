@@ -183,8 +183,8 @@ class AutoVC_Adjust(nn.Module):
         elif isConvert:
             c_trg = self.adjust(x_target, c_trg)
         else:
-            # In training，c_trg is same to c_org
-            # In conversion， you should put target mel its embedding
+            # In training，c_trg is same as c_org
+            # In conversion， you should put target mel and it's embedding
             c_trg = self.adjust(x, c_trg)
 
         tmp = []

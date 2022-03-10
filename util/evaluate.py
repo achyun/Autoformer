@@ -1,4 +1,3 @@
-from re import M
 import numpy as np
 import random
 import torch.nn as nn
@@ -31,35 +30,37 @@ class Evaluator:
                 metadata_copy.append(data)
         return sorted(metadata_copy)
 
-    def crop_mel(self, tmp, len_crop=176):
-        if tmp.shape[0] < len_crop:
-            pad_size = int(len_crop - tmp.shape[0])
+    def crop_mel(self, tmp):
+        pad_size = 0
+        if tmp.shape[0] < self.len_crop:
+            pad_size = int(self.len_crop - tmp.shape[0])
             npad = [(0, 0)] * tmp.ndim
             npad[0] = (0, pad_size)
             tmp = np.pad(tmp, pad_width=npad, mode="constant", constant_values=0)
             melsp = torch.from_numpy(tmp)
 
-        elif tmp.shape[0] == len_crop:
+        elif tmp.shape[0] == self.len_crop:
             melsp = torch.from_numpy(tmp)
         else:
-            left = np.random.randint(0, tmp.shape[0] - len_crop)
-            melsp = torch.from_numpy(tmp[left : left + len_crop, :])
-        return melsp.to(self.device)
+            left = np.random.randint(0, tmp.shape[0] - self.len_crop)
+            melsp = torch.from_numpy(tmp[left : left + self.len_crop, :])
+        return melsp.unsqueeze(0).to(self.device), pad_size
 
     def get_mel(self, speaker_id, sound_id):
         path_ = self.metadata[speaker_id][sound_id].replace("\\", "/")
-        return self.crop_mel(np.load(f"{self.root}/{path_}")).unsqueeze(0)
+        return self.crop_mel(np.load(f"{self.root}/{path_}"))
 
     def get_trans_mel(
         self,
         model: nn.Module,
         source_id: int,
         target_id: int,
-        sound_id=3,
-        isAdjust=False,
+        sound_id: int,
+        isAdjust: bool,
     ):
-        mel_source = self.get_mel(source_id, sound_id)
-        mel_target = self.get_mel(target_id, sound_id)
+        mel_source, pad_size_source = self.get_mel(source_id, sound_id)
+        mel_target, pad_size_target = self.get_mel(target_id, sound_id)
+
         emb_org = (
             torch.from_numpy(self.metadata[source_id][1]).unsqueeze(0).to(self.device)
         )
@@ -72,7 +73,15 @@ class Evaluator:
             _, _, mel_trans, _ = model(mel_source, emb_org, emb_trg, True, mel_target)
         else:
             _, mel_trans, _ = model(mel_source, emb_org, emb_trg)
-        return mel_source, mel_target, mel_trans[0, :, :]
+        mel_trans = mel_trans.squeeze(1)
+
+        if pad_size_source > 0:
+            mel_source = mel_source[:, : (self.len_crop - pad_size_source), :]
+            mel_trans = mel_trans[:, : (self.len_crop - pad_size_source), :]
+        if pad_size_target > 0:
+            mel_target = mel_target[:, : (self.len_crop - pad_size_target), :]
+
+        return mel_source, mel_target, mel_trans
 
     def get_wavs(self, mel):
         # input -> (1,80,crop_len)
@@ -81,7 +90,7 @@ class Evaluator:
     def get_dv(self, speaker_id):
         _dv = torch.zeros((1, 256))
         for _ in range(self.erroment_uttr_idx):
-            mel = self.get_mel(speaker_id, random.randint(3, self.max_uttr_idx))
+            mel, _ = self.get_mel(speaker_id, random.randint(2, self.max_uttr_idx))
             _dv += self.judge(mel)[1].detach().cpu()
         _dv = _dv / (self.erroment_uttr_idx)
         return _dv.to(self.device)
@@ -97,7 +106,7 @@ class Evaluator:
         cos_result = np.zeros((self.num_speaker, self.num_speaker))
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
-            mel = self.get_mel(i, random.randint(3, self.max_uttr_idx))
+            mel, _ = self.get_mel(i, random.randint(2, self.max_uttr_idx))
             _dv = self.judge(mel)[1].detach().cpu()
             for j, data in enumerate(self.all_dv):
                 dv = data.detach().cpu()
@@ -146,7 +155,7 @@ class Evaluator:
             )
         for source_id, data in enumerate(self.metadata):
             sp_s = data[0]
-            sound_id = random.randint(3, self.max_uttr_idx)
+            sound_id = random.randint(2, self.max_uttr_idx)
             print(f"Now Processing --- {sp_s}")
             for target_id, data in enumerate(self.metadata):
                 sp_o = data[0]

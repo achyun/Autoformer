@@ -1,7 +1,19 @@
 import torch
 import torch.nn as nn
+from .Adjust import Adjust
 from .MLPMixer import MLPMixer
 from .Norm import GroupNorm, ConvNorm, LinearNorm, PatchEmbed
+
+
+class Pooling(nn.Module):
+    def __init__(self, pool_size=3):
+        super().__init__()
+        self.pool = nn.AvgPool1d(
+            pool_size, stride=1, padding=pool_size // 2, count_include_pad=False
+        )
+
+    def forward(self, x):
+        return self.pool(x) - x
 
 
 class MetaBlock(nn.Module):
@@ -13,6 +25,7 @@ class MetaBlock(nn.Module):
         out_dim_neck=88,
         patch_size=8,
         mlp_depth=1,
+        pool_size=3,
         conv_activate=nn.ReLU(),
         w_init_gain="relu",
         norm_layer=GroupNorm,
@@ -20,17 +33,7 @@ class MetaBlock(nn.Module):
 
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.token_mixer = nn.Sequential(
-            ConvNorm(
-                source_emb,
-                source_emb,
-                kernel_size=5,
-                padding=2,
-                w_init_gain=w_init_gain,
-            ),
-            nn.BatchNorm1d(source_emb),
-            conv_activate,
-        )
+        self.token_mixer = Pooling(pool_size=pool_size)
         self.norm2 = norm_layer(crop_len)
         self.conv_1 = nn.Sequential(
             ConvNorm(
@@ -132,6 +135,8 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
+    """Decoder module:"""
+
     def __init__(self, dim, num_layers=1):
         super(Decoder, self).__init__()
         self.embding = PatchEmbed(in_chans=176)
@@ -179,9 +184,8 @@ class Decoder(nn.Module):
 
 
 class Postnet(nn.Module):
-    """
-    Postnet
-    - Same as AutoVC
+    """Postnet
+    - Five 1-d convolution with 512 channels and kernel size 5
     """
 
     def __init__(self):
@@ -243,18 +247,23 @@ class Postnet(nn.Module):
         return x
 
 
-class MetaConv(nn.Module):
-    def __init__(self, dim_neck, dim, dim_pre, freq):
-        super(MetaConv, self).__init__()
+class MetaPool(nn.Module):
+    def __init__(self, dim_neck, dim_emb, dim_pre, freq):
+        super(MetaPool, self).__init__()
         self.encoder = Encoder(dim_neck, freq, dim_pre)
         self.decoder = Decoder(dim_pre)
         self.postnet = Postnet()
+        self.adjust = Adjust(dim_emb)
 
-    def forward(self, x, c_org, c_trg):
+    def forward(self, x, c_org, c_trg, isConvert=False, x_target=None):
 
         codes = self.encoder(x, c_org)
         if c_trg is None:
             return torch.cat(codes, dim=-1)
+        elif isConvert:
+            c_trg = self.adjust(x_target, c_trg)
+        else:
+            c_trg = self.adjust(x, c_trg)
 
         tmp = []
         for code in codes:
