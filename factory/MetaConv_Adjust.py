@@ -276,4 +276,4 @@ class MetaConv_Adjust(nn.Module):
         mel_outputs = mel_outputs.unsqueeze(1)
         mel_outputs_postnet = mel_outputs_postnet.unsqueeze(1)
 
-        return mel_outputs, mel_outputs_postnet, torch.cat(codes, dim=-1)
+        return c_org, mel_outputs, mel_outputs_postnet, torch.cat(codes, dim=-1)

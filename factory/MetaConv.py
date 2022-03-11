@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
+
 from .MLPMixer import MLPMixer
-from .Norm import GroupNorm, ConvNorm, LinearNorm, PatchEmbed
+from .Norm import ConvNorm, GroupNorm, LinearNorm, PatchEmbed
 
 
 class MetaBlock(nn.Module):

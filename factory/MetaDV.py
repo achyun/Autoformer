@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import random
-from .MLPMixer import MLPMixer
+from .MLPMixer import *
 from .Norm import ConvNorm
 
 

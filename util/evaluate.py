@@ -1,6 +1,8 @@
 import numpy as np
 import random
+from torch import detach
 import torch.nn as nn
+from scipy import linalg
 from factory import *
 from melgan.interface import *
 
@@ -17,7 +19,9 @@ class Evaluator:
         self.device = config.device
         self.all_speaker = config.all_speaker
         self.judge = config.judge
+        self.x_fid_style = config.x_fid_style
         self.metadata = self.build_metadata(config.metadata)
+
         self.vocoder = MelVocoder(model_name="model/static/multi_speaker")
         if self.judge != None:
             print("Detect Judge ! generate all Real Data d-vector")
@@ -102,21 +106,19 @@ class Evaluator:
             all_dv.append(self.get_dv(i))
         return all_dv
 
-    def get_real_data_result(self):
+    def get_real_data_cos(self):
         cos_result = np.zeros((self.num_speaker, self.num_speaker))
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
             mel, _ = self.get_mel(i, random.randint(2, self.max_uttr_idx))
-            _dv = self.judge(mel)[1].detach().cpu()
+            _style = self.judge(mel)[1].detach().cpu()
             for j, data in enumerate(self.all_dv):
                 dv = data.detach().cpu()
                 cos = (
                     torch.clamp(
-                        nn.functional.cosine_similarity(_dv, dv, dim=1, eps=1e-8),
+                        nn.functional.cosine_similarity(dv, _style, dim=1, eps=1e-8),
                         min=0.0,
                     )
-                    .detach()
-                    .cpu()
                     .numpy()[0]
                     .astype(np.float32)
                 )
@@ -148,11 +150,13 @@ class Evaluator:
         return sum(trans) / len(trans), sum(trans_) / len(trans_)
 
     def generate_result(self, models: list, isAdjust=False):
-        cos_reslut = []
+        cos_result = []
+
         for _ in range(len(models)):
-            cos_reslut.append(
+            cos_result.append(
                 np.zeros((self.num_speaker, self.num_speaker, self.num_speaker))
             )
+
         for source_id, data in enumerate(self.metadata):
             sp_s = data[0]
             sound_id = random.randint(2, self.max_uttr_idx)
@@ -160,15 +164,18 @@ class Evaluator:
             for target_id, data in enumerate(self.metadata):
                 sp_o = data[0]
                 _dv_result = []
-                for model in models:
-                    _, _, trans_mel = self.get_trans_mel(
-                        model, source_id, target_id, sound_id, isAdjust
-                    )
-                    _dv_result.append(self.judge(trans_mel)[1])
                 if source_id == target_id:
                     print(f"Reconstruct ---- {sp_s} to {sp_o}")
                 else:
                     print(f"Trans --- {sp_s} to {sp_o}")
+
+                for model_id, model in enumerate(models):
+                    _, _, trans_mel = self.get_trans_mel(
+                        model, source_id, target_id, sound_id, isAdjust
+                    )
+                    trans_style = self.judge(trans_mel)[1]
+                    _dv_result.append(trans_style)
+
                 for k, emb in enumerate(self.all_dv):
                     for model_id, _dv in enumerate(_dv_result):
                         cos = (
@@ -183,5 +190,60 @@ class Evaluator:
                             .numpy()[0]
                             .astype(np.float32)
                         )
-                        cos_reslut[model_id][source_id][target_id][k] = cos
-        return cos_reslut
+                        cos_result[model_id][source_id][target_id][k] = cos
+        return cos_result
+
+    def caculate_fid(self, x, y):
+        """
+        x -> real data embeding (utterence_num,256)
+        y -> trans voice embeding (utterence_num,256)
+        """
+        mu_x, mu_y = (
+            np.atleast_1d(np.mean(x, axis=1)),
+            np.atleast_1d(np.mean(y, axis=1)),
+        )
+        sigma_x, sigma_y = (
+            np.atleast_2d(np.cov(x, rowvar=False)),
+            np.atleast_2d(np.cov(y, rowvar=False)),
+        )
+
+        diff = mu_x - mu_y
+        covmean, _ = linalg.sqrtm(sigma_x.dot(sigma_y), disp=False)
+        tr_covmean = np.trace(covmean)
+        return diff.dot(diff) + np.trace(sigma_x) + np.trace(sigma_y) - 2 * tr_covmean
+
+    def get_x_fid(self):
+        all_speaker_style = {}
+        for speaker_id, speaker in enumerate(self.all_speaker):
+            print(f"Processing {speaker}")
+            _dv = []
+            for id_ in range(self.max_uttr_idx):
+                mel = self.get_mel(speaker_id, id_ + 2)[0]
+                _dv.append(self.judge(mel)[1].squeeze().detach().cpu().numpy())
+            all_speaker_style[speaker] = np.array(_dv)
+        return np.array([all_speaker_style])
+
+    def get_fid_result(self, model, isAdjust=False):
+
+        all_fid = {}
+        for source_speaker_id, source_speaker in enumerate(self.all_speaker):
+            print(f"Processing {source_speaker}")
+            _result = []
+            for target_speaker_id, target_speaker in enumerate(self.all_speaker):
+                _dv = []
+                for sound_id in range(self.max_uttr_idx):
+                    _, _, trans_mel = self.get_trans_mel(
+                        model,
+                        source_speaker_id,
+                        target_speaker_id,
+                        sound_id + 2,
+                        isAdjust,
+                    )
+                    trans_style = (
+                        self.judge(trans_mel)[1].squeeze().detach().cpu().numpy()
+                    )
+                    _dv.append(trans_style)
+                _result.append([target_speaker, np.array(_dv)])
+            all_fid[source_speaker] = _result
+
+        return np.array([all_fid])

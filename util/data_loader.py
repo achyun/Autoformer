@@ -1,10 +1,20 @@
-from torch.utils import data
-import torch
-import numpy as np
-import pickle
+"""
+@inproceedings{qian2019autovc,
+  title={Autovc: Zero-shot voice style transfer with only autoencoder loss},
+  author={Qian, Kaizhi and Zhang, Yang and Chang, Shiyu and Yang, Xuesong and Hasegawa-Johnson, Mark},
+  booktitle={International Conference on Machine Learning},
+  pages={5210--5219},
+  year={2019},
+  organization={PMLR}
+}
+"""
 import os
+import pickle
+from multiprocessing import Manager, Process
 
-from multiprocessing import Process, Manager
+import numpy as np
+import torch
+from torch.utils import data
 
 
 class Utterances(data.Dataset):

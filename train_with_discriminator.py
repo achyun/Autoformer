@@ -12,10 +12,6 @@ from factory.Discriminator import Discriminator
 
 
 class Solver(object):
-    """
-    最原始的 AutoVC 訓練方法
-    """
-
     def __init__(self, vcc_loader, config):
         """Initialize configurations."""
 

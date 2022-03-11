@@ -16,8 +16,6 @@ class Solver(object):
     """
 
     def __init__(self, vcc_loader, config):
-        """Initialize configurations."""
-
         # Data loader.
         self.vcc_loader = vcc_loader
 
@@ -43,20 +41,20 @@ class Solver(object):
 
     def build_model(self):
 
-        self.G = getattr(
+        self.VC = getattr(
             importlib.import_module(f"factory.{self.model_name}"), self.model_name
         )(self.dim_neck, self.dim_emb, self.dim_pre, self.freq)
 
-        self.g_optimizer = torch.optim.Adam(self.G.parameters(), 0.0001)
-        self.G.to(self.device)
+        self.vc_optimizer = torch.optim.Adam(self.VC.parameters(), 0.0001)
+        self.VC.to(self.device)
 
     def reset_grad(self):
-        self.g_optimizer.zero_grad()
+        self.vc_optimizer.zero_grad()
 
     def train(self):
 
         data_loader = self.vcc_loader
-        keys = ["G/loss_id", "G/loss_id_psnt", "G/loss_cd"]
+        keys = ["VC/loss_id", "VC/loss_id_psnt", "VC/loss_cd"]
 
         print("Start training...")
         start_time = time.time()
@@ -80,28 +78,28 @@ class Solver(object):
             #                               2. Train the generator                                #
             # =================================================================================== #
 
-            self.G = self.G.train()
+            self.VC = self.VC.train()
 
             # Identity mapping loss
-            x_identic, x_identic_psnt, code_real = self.G(x_real, emb_org, emb_org)
-            g_loss_id = F.mse_loss(x_real, x_identic.squeeze())
-            g_loss_id_psnt = F.mse_loss(x_real, x_identic_psnt.squeeze())
+            x_identic, x_identic_psnt, code_real = self.VC(x_real, emb_org, emb_org)
+            vc_loss_id = F.mse_loss(x_real, x_identic.squeeze())
+            vc_loss_id_psnt = F.mse_loss(x_real, x_identic_psnt.squeeze())
 
             # Code semantic loss.
-            code_reconst = self.G(x_identic_psnt, emb_org, None)
-            g_loss_cd = F.l1_loss(code_real, code_reconst)
+            code_reconst = self.VC(x_identic_psnt, emb_org, None)
+            vc_loss_cd = F.l1_loss(code_real, code_reconst)
 
             # Backward and optimize.
-            g_loss = g_loss_id + g_loss_id_psnt + self.lambda_cd * g_loss_cd
+            vc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd
             self.reset_grad()
-            g_loss.backward()
-            self.g_optimizer.step()
+            vc_loss.backward()
+            self.vc_optimizer.step()
 
             # Logging.
             loss = {}
-            loss["G/loss_id"] = g_loss_id.item()
-            loss["G/loss_id_psnt"] = g_loss_id_psnt.item()
-            loss["G/loss_cd"] = g_loss_cd.item()
+            loss["VC/loss_id"] = vc_loss_id.item()
+            loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
+            loss["VC/loss_cd"] = vc_loss_cd.item()
 
             # =================================================================================== #
             #                               4. Print Traning Info                                 #
@@ -111,9 +109,9 @@ class Solver(object):
 
                 wandb.log(
                     {
-                        "G_LOSS_ID": g_loss_id.item(),
-                        "G_LOSS_ID_PSNET": g_loss_id_psnt.item(),
-                        "G_LOSS_CD": g_loss_cd.item(),
+                        "VC_LOSS_ID": vc_loss_id.item(),
+                        "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
+                        "VC_LOSS_CD": vc_loss_cd.item(),
                     }
                 )
                 wandb.save("autovc_org.pt")
@@ -179,4 +177,4 @@ if __name__ == "__main__":
 
     solver = Solver(vcc_loader, config)
     solver.train()
-    torch.save(solver.G.state_dict(), f"{args.save_model_name}.pt")
+    torch.save(solver.VC.state_dict(), f"{args.save_model_name}.pt")
