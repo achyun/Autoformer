@@ -36,11 +36,7 @@ class MetaBlock(nn.Module):
         self.norm2 = norm_layer(crop_len)
         self.conv_1 = nn.Sequential(
             ConvNorm(
-                source_emb,
-                crop_len,
-                kernel_size=5,
-                padding=2,
-                w_init_gain=w_init_gain,
+                source_emb, crop_len, kernel_size=5, padding=2, w_init_gain=w_init_gain,
             ),
             nn.BatchNorm1d(crop_len),
             conv_activate,
@@ -83,11 +79,7 @@ class MetaBlock(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(
-        self,
-        dim_neck,
-        freq,
-        dim,
-        num_layers=3,
+        self, dim_neck, freq, dim, num_layers=3,
     ):
         super().__init__()
         self.freq = freq

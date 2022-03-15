@@ -30,7 +30,7 @@ class Evaluator:
     def build_metadata(self, metadata):
         metadata_copy = []
         for data in metadata:
-            if data[0] in self.all_speaker:
+            if str(data[0]) in self.all_speaker:
                 metadata_copy.append(data)
         return sorted(metadata_copy)
 
@@ -95,7 +95,8 @@ class Evaluator:
         _dv = torch.zeros((1, 256))
         for _ in range(self.erroment_uttr_idx):
             mel, _ = self.get_mel(speaker_id, random.randint(2, self.max_uttr_idx))
-            _dv += self.judge(mel)[1].detach().cpu()
+            # _dv += self.judge(mel)[1].detach().cpu()
+            _dv += self.judge(mel).detach().cpu()
         _dv = _dv / (self.erroment_uttr_idx)
         return _dv.to(self.device)
 
@@ -111,7 +112,8 @@ class Evaluator:
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
             mel, _ = self.get_mel(i, random.randint(2, self.max_uttr_idx))
-            _style = self.judge(mel)[1].detach().cpu()
+            # _style = self.judge(mel)[1].detach().cpu()
+            _style = self.judge(mel).detach().cpu()
             for j, data in enumerate(self.all_dv):
                 dv = data.detach().cpu()
                 cos = (
@@ -173,7 +175,8 @@ class Evaluator:
                     _, _, trans_mel = self.get_trans_mel(
                         model, source_id, target_id, sound_id, isAdjust
                     )
-                    trans_style = self.judge(trans_mel)[1]
+                    # trans_style = self.judge(trans_mel)[1]
+                    trans_style = self.judge(trans_mel)
                     _dv_result.append(trans_style)
 
                 for k, emb in enumerate(self.all_dv):
@@ -219,7 +222,8 @@ class Evaluator:
             _dv = []
             for id_ in range(self.max_uttr_idx):
                 mel = self.get_mel(speaker_id, id_ + 2)[0]
-                _dv.append(self.judge(mel)[1].squeeze().detach().cpu().numpy())
+                # _dv.append(self.judge(mel)[1].squeeze().detach().cpu().numpy())
+                _dv.append(self.judge(mel).squeeze().detach().cpu().numpy())
             all_speaker_style[speaker] = np.array(_dv)
         return np.array([all_speaker_style])
 
@@ -239,6 +243,8 @@ class Evaluator:
                         sound_id + 2,
                         isAdjust,
                     )
+                    # In Sure the trans mel crop len is 176
+                    trans_mel, _ = self.crop_mel(trans_mel)
                     trans_style = (
                         self.judge(trans_mel)[1].squeeze().detach().cpu().numpy()
                     )

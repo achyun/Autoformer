@@ -28,7 +28,10 @@ class MetaBlock(nn.Module):
             image_size=emb,
             channels=channels,
             patch_size=patch_size,
+            kernel_size=kernel_size,
             dim=emb,
+            out_dim=88,
+            padding=1,
             depth=mlp_depth,
         )
         self.dv = nn.Linear(emb * 2, dim_emb)

@@ -109,12 +109,7 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(
-        self,
-        patch_size=5,
-        stride=1,
-        padding=2,
-        in_chans=336,
-        embed_dim=512,
+        self, patch_size=5, stride=1, padding=2, in_chans=336, embed_dim=512,
     ):
         super().__init__()
         self.proj = nn.Conv1d(
@@ -141,17 +136,14 @@ class MetaBlock(nn.Module):
         mlp_depth=1,
         kernel_size=3,
         channels=1,
-        sample_count = 4,
+        sample_count=4,
         norm_layer=nn.BatchNorm1d,
     ):
- 
+
         super().__init__()
         # 這個 token_mixer 可以換成其他的，就是 "MetaFormer" 的概念
         self.token_mixer = nn.LSTM(
-            input_size=80,
-            hidden_size=emb,
-            num_layers=1,
-            batch_first=True,
+            input_size=80, hidden_size=emb, num_layers=1, batch_first=True,
         )
         self.conv_1 = ConvNorm(crop_len, emb, kernel_size=kernel_size)
         self.mlp = MLPMixer(
@@ -166,17 +158,16 @@ class MetaBlock(nn.Module):
         self.crop_len = crop_len
         self.sample_count = sample_count
 
-        
     def forward(self, x):
         x, _ = self.token_mixer(x)
         embedding_1 = x[:, -1, :]
         embedding_2 = []
         for i in range(self.sample_count):
             left = random.randint(0, x.shape[1] - self.crop_len)
-            x_after_conv_1 = self.conv_1(x[:,left : left + self.crop_len,:])
+            x_after_conv_1 = self.conv_1(x[:, left : left + self.crop_len, :])
             x_mlp = self.mlp(x_after_conv_1.unsqueeze(1))
             embedding_2.append(x_mlp[:, -1, :])
-        
+
         embedding_2 = torch.stack(embedding_2).sum(dim=0).div(self.sample_count)
         embedding = self.dv(torch.cat((embedding_1, embedding_2), dim=1))
         norm = embedding.norm(p=2, dim=-1, keepdim=True)
@@ -192,4 +183,3 @@ class MetaDV(nn.Module):
 
     def forward(self, x):
         return self.metablock(x)
-

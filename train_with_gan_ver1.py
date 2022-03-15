@@ -14,7 +14,7 @@ from factory.MetaDV import MetaDV
 
 class Solver(object):
     """
-    AutoVC + Adjust Speaker Embedding + Gan
+    AutoVC + Gan
     """
 
     def __init__(self, vcc_loader, config):
@@ -51,8 +51,6 @@ class Solver(object):
             "VC/loss_id",
             "VC/loss_id_psnt",
             "VC/loss_cd",
-            "A/loss_adjust_reconst",
-            "A/loss_adjust",
             "C/loss_trans",
             "D/loss",
         ]
@@ -120,7 +118,7 @@ class Solver(object):
             self.C = self.C.train()
             self.D = self.D.train()
 
-            org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
+            x_identic, x_identic_psnt, code_real = self.VC(
                 x_source, org_style, org_style
             )
             code_reconst = self.VC(x_identic_psnt, org_style, None)
@@ -129,33 +127,21 @@ class Solver(object):
             vc_loss_id_psnt = F.mse_loss(x_source, x_identic_psnt.squeeze())
             # Code semantic loss.
             vc_loss_cd = F.l1_loss(code_real, code_reconst)
-            # Adjust Speaker embedding loss
-            a_loss_adjust_reconst = F.l1_loss(org_style_adjust, org_style)
-            autovc_adjust_loss = (
-                vc_loss_id
-                + vc_loss_id_psnt
-                + self.lambda_cd * vc_loss_cd
-                + a_loss_adjust_reconst
-            )
+
+            autovc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd
 
             if (i + 1) % self.n_critic == 0 and (i + 1) > self.pretrained_step:
                 x_target, target_style = self.get_data()
-                org_style_adjust, x_identic, x_identic_psnt, code_real = self.VC(
-                    x_source, org_style, target_style, True, x_target
-                )
+                _, x_identic_psnt, _ = self.VC(x_source, org_style, target_style)
                 # 抽出 style
                 _, trans_style = self.C(x_identic_psnt.squeeze())
+                print(trans_style.shape)
                 # x_target 是 Real Data
                 real_prob = self.D(x_target)
                 fake_prob = self.D(x_identic_psnt.squeeze())
                 # Cosine Embedding Loss 接近 0.1 時就代表轉換的不錯了
-                # Adjust Speaker embedding loss
-                # a_loss_adjust = F.l1_loss(org_style_adjust, org_style)
-                a_loss_adjust = F.cosine_embedding_loss(
-                    org_style_adjust, org_style, self.cosin_label
-                )
+
                 # Classifier loss
-                # c_loss_trans = F.l1_loss(trans_style, target_style)
                 c_loss_trans = F.cosine_embedding_loss(
                     trans_style, target_style, self.cosin_label
                 )
@@ -163,8 +149,7 @@ class Solver(object):
                 d_loss = self.discriminator_loss(real_prob, fake_prob)
 
                 autovc_gan_loss = (
-                    autovc_adjust_loss
-                    + self.lambda_ad * a_loss_adjust
+                    autovc_loss
                     + self.lambda_cls * c_loss_trans
                     + self.lambda_dis * d_loss
                 )
@@ -176,7 +161,7 @@ class Solver(object):
 
             else:
                 self.reset_grad()
-                autovc_adjust_loss.backward()
+                autovc_loss.backward()
                 self.vc_optimizer.step()
 
             if (i + 1) > self.pretrained_step and (i + 1) % self.log_step == 0:
@@ -184,21 +169,19 @@ class Solver(object):
                 loss["VC/loss_id"] = vc_loss_id.item()
                 loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
                 loss["VC/loss_cd"] = vc_loss_cd.item()
-                loss["A/loss_adjust_reconst"] = a_loss_adjust_reconst.item()
-                loss["A/loss_adjust"] = a_loss_adjust.item()
                 loss["C/loss_trans"] = c_loss_trans.item()
                 loss["D/loss"] = d_loss.item()
+                """
                 wandb.log(
                     {
                         "VC_LOSS_ID": vc_loss_id.item(),
                         "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
                         "VC_LOSS_CD": vc_loss_cd.item(),
-                        "A/LOSS_ADJUST_RECONST": a_loss_adjust_reconst.item(),
-                        "A/LOSS_ADJUST": a_loss_adjust.item(),
                         "C/LOSS_TRANS": c_loss_trans.item(),
                         "D/LOSS": d_loss.item(),
                     }
                 )
+                """
                 self.print_log(loss, i, start_time)
 
             elif (i + 1) % self.log_step == 0:
@@ -206,18 +189,17 @@ class Solver(object):
                 loss["VC/loss_id"] = vc_loss_id.item()
                 loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
                 loss["VC/loss_cd"] = vc_loss_cd.item()
-                loss["A/loss_adjust_reconst"] = a_loss_adjust_reconst.item()
-                loss["A/loss_adjust"] = 0.0
                 loss["C/loss_trans"] = 0.0
                 loss["D/loss"] = 0.0
+                """
                 wandb.log(
                     {
                         "VC_LOSS_ID": vc_loss_id.item(),
                         "VC_LOSS_ID_PSNET": vc_loss_id_psnt.item(),
                         "VC_LOSS_CD": vc_loss_cd.item(),
-                        "A/LOSS_ADJUST_RECONST": a_loss_adjust_reconst.item(),
                     }
                 )
+                """
                 self.print_log(loss, i, start_time)
 
             if (i + 2) % self.log_step == 0:
@@ -250,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", help="traning model name")
     parser.add_argument("--data_dir", help="traning data folder")
     parser.add_argument("--save_model_name")
-    parser.add_argument("--num_iters", default=1000000, help="iter time")
+    parser.add_argument("--num_iters", default=10, help="iter time")
     args = parser.parse_args()
 
     config = Config(args.model_name, args.data_dir, int(args.num_iters))
@@ -265,6 +247,7 @@ if __name__ == "__main__":
     print(" ----------------------")
 
     ### Init Wandb
+    """
     wandb.init(project=f'AutoVC {datetime.date.today().strftime("%b %d")}')
     wandb.run.name = args.model_name
     wandb.run.save()
@@ -274,7 +257,7 @@ if __name__ == "__main__":
     w_config.dim_emb = config.dim_emb
     w_config.freq = config.freq
     w_config.batch_size = config.batch_size
-
+    """
     # 加速 conv，conv 的輸入 size 不會變的話開這個會比較快
     cudnn.benchmark = True
     # Data loader.
