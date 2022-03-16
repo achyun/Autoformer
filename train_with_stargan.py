@@ -52,7 +52,7 @@ class Solver(object):
             "VC/loss_id_psnt",
             "VC/loss_cd",
             "C/loss_trans",
-            "C/loss_recons",
+            "C/loss_reconst",
             "D/loss",
             "Cycle/loss",
         ]
@@ -158,7 +158,7 @@ class Solver(object):
                 d_loss = self.discriminator_loss(real_prob, fake_prob)
 
                 # cycle loss Target to Source 要越像越好
-                cycle_loss = F.mse_loss(x_source, x_reconstruct)
+                cycle_loss = F.mse_loss(x_source, x_reconstruct.squeeze())
 
                 autovc_gan_loss = (
                     autovc_loss
@@ -204,8 +204,10 @@ class Solver(object):
                 loss["VC/loss_id"] = vc_loss_id.item()
                 loss["VC/loss_id_psnt"] = vc_loss_id_psnt.item()
                 loss["VC/loss_cd"] = vc_loss_cd.item()
+                loss["C/loss_reconst"] = 0.0
                 loss["C/loss_trans"] = 0.0
                 loss["D/loss"] = 0.0
+                loss["Cycle/loss"] = 0.0
                 """
                 wandb.log(
                     {
