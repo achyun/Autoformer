@@ -86,19 +86,19 @@ class AdaIN(nn.Module):
     def __init__(self,):
         super().__init__()
 
-    def forward(self, content, style):
+    def forward(self, content, mu, std):
         size = content.size()
-        norm_feat = (content - content.mean().expand(size)) / (content.std())
-        return (norm_feat * style.std().expand(size)) + style.mean().expand(size)
+        in_c = (content - content.mean().expand(size)) / content.std()
+        return (in_c * std) + mu
 
 
-class MetaIN(nn.Module):
+class IN(nn.Module):
     def __init__(self,):
-        """
-        這裡丟進來的 content 已經是沒有自己 style 的內容了
-        """
+
         super().__init__()
 
-    def forward(self, content, style):
+    def forward(self, content):
         size = content.size()
-        return (content * style.std().expand(size)) + style.mean().expand(size)
+        mu = content.mean().expand(size)
+        std = content.std()
+        return ((content - mu) / std), mu, std
