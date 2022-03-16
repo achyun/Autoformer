@@ -106,7 +106,7 @@ class Solver(object):
             # =================================================================================== #
 
             if (i + 1) % self.log_step == 0:
-
+                """
                 wandb.log(
                     {
                         "VC_LOSS_ID": vc_loss_id.item(),
@@ -115,6 +115,7 @@ class Solver(object):
                     }
                 )
                 wandb.save("autovc_org.pt")
+                """
                 et = time.time() - start_time
                 et = str(datetime.timedelta(seconds=et))[:-7]
                 log = "Elapsed [{}], Iteration [{}/{}]".format(
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     config = Config(args.model_name, args.data_dir, int(args.num_iters))
 
     ### Init Wandb
-
+    """
     wandb.init(project=f'AutoVC {datetime.date.today().strftime("%b %d")}')
     wandb.run.name = args.model_name
     wandb.run.save()
@@ -164,7 +165,7 @@ if __name__ == "__main__":
     w_config.dim_emb = config.dim_emb
     w_config.freq = config.freq
     w_config.batch_size = config.batch_size
-
+    """
     # 加速 conv，conv 的輸入 size 不會變的話開這個會比較快
     cudnn.benchmark = True
     # Data loader.
