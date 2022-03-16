@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+
 class ConvNorm(nn.Module):
     def __init__(
         self,
@@ -89,3 +90,15 @@ class AdaIN(nn.Module):
         size = content.size()
         norm_feat = (content - content.mean().expand(size)) / (content.std())
         return (norm_feat * style.std().expand(size)) + style.mean().expand(size)
+
+
+class MetaIN(nn.Module):
+    def __init__(self,):
+        """
+        這裡丟進來的 content 已經是沒有自己 style 的內容了
+        """
+        super().__init__()
+
+    def forward(self, content, style):
+        size = content.size()
+        return (content * style.std().expand(size)) + style.mean().expand(size)
