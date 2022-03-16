@@ -25,6 +25,7 @@ class Solver(object):
         self.dim_emb = config.dim_emb
         self.dim_pre = config.dim_pre
         self.freq = config.freq
+        self.isadain = config.isadain
         self.model_name = config.model_name
 
         # Training configurations.
@@ -33,7 +34,7 @@ class Solver(object):
 
         # Miscellaneous.
         self.use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
+        self.device = config.device
         self.log_step = config.log_step
 
         # Build the model.
@@ -79,16 +80,18 @@ class Solver(object):
             # =================================================================================== #
 
             self.VC = self.VC.train()
-
             # Identity mapping loss
             x_identic, x_identic_psnt, code_real = self.VC(x_real, emb_org, emb_org)
             vc_loss_id = F.mse_loss(x_real, x_identic.squeeze())
             vc_loss_id_psnt = F.mse_loss(x_real, x_identic_psnt.squeeze())
 
             # Code semantic loss.
-            code_reconst = self.VC(x_identic_psnt, emb_org, None)
-            vc_loss_cd = F.l1_loss(code_real, code_reconst)
+            if self.isadain:
+                code_reconst, _ = self.VC(x_identic_psnt, emb_org, None)
+            else:
+                code_reconst = self.VC(x_identic_psnt, emb_org, None)
 
+            vc_loss_cd = F.l1_loss(code_real, code_reconst)
             # Backward and optimize.
             vc_loss = vc_loss_id + vc_loss_id_psnt + self.lambda_cd * vc_loss_cd
             self.reset_grad()
@@ -130,10 +133,12 @@ class Solver(object):
 
 
 class Config:
-    def __init__(self, model_name, data_dir, num_iters):
+    def __init__(self, model_name, data_dir, device, num_iters, isadain):
         self.model_name = model_name
         self.data_dir = data_dir
         self.num_iters = num_iters
+        self.isadain = isadain
+        self.device = device
         self.batch_size = 2
         self.len_crop = 176
         self.lambda_cd = 1
@@ -149,10 +154,18 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", help="traning model name")
     parser.add_argument("--data_dir", help="traning data folder")
     parser.add_argument("--save_model_name")
+    parser.add_argument("--use_adain", default=False)
+    parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--num_iters", default=1000000, help="iter time")
     args = parser.parse_args()
 
-    config = Config(args.model_name, args.data_dir, int(args.num_iters))
+    config = Config(
+        model_name=args.model_name,
+        data_dir=args.data_dir,
+        device=args.device,
+        num_iters=int(args.num_iters),
+        isadain=bool(args.use_adain),
+    )
 
     ### Init Wandb
     """

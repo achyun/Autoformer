@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from Norm import ConvNorm, LinearNorm, AdaIN
+from .Norm import ConvNorm, LinearNorm, AdaIN
 
 
 class Encoder(nn.Module):
@@ -58,14 +58,12 @@ class Encoder(nn.Module):
         for feature_layer in self.feature_pre_extract:
             x = feature_layer(x)
             features.append([x.mean(), x.std()])
-
         # Now put the embeding back
         c_org = c_org.unsqueeze(-1).expand(-1, -1, x.size(-1))
         x = torch.cat((x, c_org), dim=1)
         for conv in self.convolutions:
             x = F.relu(conv(x))
         x = x.transpose(1, 2)
-
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
         out_forward = outputs[:, :, : self.dim_neck]
@@ -79,7 +77,6 @@ class Encoder(nn.Module):
                     dim=-1,
                 )
             )
-
         return codes, features
 
 
@@ -88,24 +85,7 @@ class Decoder(nn.Module):
 
     def __init__(self, dim_neck, dim_emb, dim_pre):
         super(Decoder, self).__init__()
-        self.adain = AdaIN()
-        self.lstm1 = nn.LSTM(dim_neck * 2, dim_pre, 1, batch_first=True)
-        feature_pre_combine = []
-        for i in range(3):
-            conv_layer = nn.Sequential(
-                ConvNorm(
-                    dim_pre,
-                    dim_pre,
-                    kernel_size=5,
-                    stride=1,
-                    padding=2,
-                    dilation=1,
-                    w_init_gain="linear",
-                ),
-            )
-            feature_pre_combine.append(conv_layer)
-        self.feature_pre_combine = nn.ModuleList(feature_pre_combine)
-
+        self.lstm1 = nn.LSTM(dim_neck * 2 + dim_emb, dim_pre, 1, batch_first=True)
         convolutions = []
         for _ in range(3):
             conv_layer = nn.Sequential(
@@ -122,33 +102,18 @@ class Decoder(nn.Module):
             )
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
-
         self.lstm2 = nn.LSTM(dim_pre, 1024, 2, batch_first=True)
-
         self.linear_projection = LinearNorm(1024, 80)
 
-    def forward(self, x, c_trg, features):
-
+    def forward(self, x):
         # self.lstm1.flatten_parameters()
         x, _ = self.lstm1(x)
         x = x.transpose(1, 2)
-
-        # Here we combine the pre extract feature back
-        for combine_layers, feature in zip(self.feature_pre_combine, features):
-            x = combine_layers(x)
-            mu, std = feature[0], feature[1]
-            x = self.adain(x, mu, std)
-
-        # Now put the embeding back
-        x = torch.cat((x, c_trg.unsqueeze(1).expand(-1, x.size(1), -1)), dim=-1)
         for conv in self.convolutions:
             x = F.relu(conv(x))
         x = x.transpose(1, 2)
-
         outputs, _ = self.lstm2(x)
-
         decoder_output = self.linear_projection(outputs)
-
         return decoder_output
 
 
@@ -160,8 +125,8 @@ class Postnet(nn.Module):
 
     def __init__(self):
         super(Postnet, self).__init__()
-        self.convolutions = nn.ModuleList()
 
+        self.convolutions = nn.ModuleList()
         self.convolutions.append(
             nn.Sequential(
                 ConvNorm(
@@ -207,12 +172,31 @@ class Postnet(nn.Module):
                 nn.BatchNorm1d(80),
             )
         )
+        self.adain = AdaIN()
+        feature_last_combine = []
+        for i in range(3):
+            conv_layer = nn.Sequential(
+                ConvNorm(
+                    80,
+                    80,
+                    kernel_size=5,
+                    stride=1,
+                    padding=2,
+                    dilation=1,
+                    w_init_gain="linear",
+                ),
+            )
+            feature_last_combine.append(conv_layer)
+        self.feature_last_combine = nn.ModuleList(feature_last_combine)
 
-    def forward(self, x):
+    def forward(self, x, features):
         for i in range(len(self.convolutions) - 1):
             x = torch.tanh(self.convolutions[i](x))
 
         x = self.convolutions[-1](x)
+        for combine_layer, features in zip(self.feature_last_combine, features):
+            x = self.adain(x, features[0], features[1])
+            x = combine_layer(x)
 
         return x
 
@@ -240,26 +224,19 @@ class AutoVC2(nn.Module):
             tmp.append(code.unsqueeze(1).expand(-1, int(x.size(1) / len(codes)), -1))
         code_exp = torch.cat(tmp, dim=1)
 
+        encoder_outputs = torch.cat(
+            (code_exp, c_trg.unsqueeze(1).expand(-1, x.size(1), -1)), dim=-1
+        )
+        mel_outputs = self.decoder(encoder_outputs)
         if target_feature is not None:
-            mel_outputs = self.decoder(code_exp, c_trg, target_feature)
+            mel_outputs_postnet = self.postnet(
+                mel_outputs.transpose(2, 1), target_feature
+            )
         else:
-            mel_outputs = self.decoder(code_exp, c_trg, features)
+            mel_outputs_postnet = self.postnet(mel_outputs.transpose(2, 1), features)
 
-        mel_outputs_postnet = self.postnet(mel_outputs.transpose(2, 1))
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet.transpose(2, 1)
         mel_outputs = mel_outputs.unsqueeze(1)
         mel_outputs_postnet = mel_outputs_postnet.unsqueeze(1)
 
         return mel_outputs, mel_outputs_postnet, torch.cat(codes, dim=-1)
-
-
-def test():
-    e = torch.rand(2, 256)
-    x = torch.rand(2, 176, 80)
-    A = AutoVC2(44, 256, 512, 22)
-    _, _, _ = A(x, e, e)
-    _, feature = A(x, e, None)
-    _, _, _ = A(x, e, e, feature)
-
-
-test()
