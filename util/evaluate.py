@@ -19,7 +19,6 @@ class Evaluator:
         self.device = config.device
         self.all_speaker = config.all_speaker
         self.judge = config.judge
-        self.x_fid_style = config.x_fid_style
         self.metadata = self.build_metadata(config.metadata)
 
         self.vocoder = MelVocoder(model_name="model/static/multi_speaker")
@@ -195,61 +194,3 @@ class Evaluator:
                         )
                         cos_result[model_id][source_id][target_id][k] = cos
         return cos_result
-
-    def caculate_fid(self, x, y):
-        """
-        x -> real data embeding (utterence_num,256)
-        y -> trans voice embeding (utterence_num,256)
-        """
-        mu_x, mu_y = (
-            np.atleast_1d(np.mean(x, axis=1)),
-            np.atleast_1d(np.mean(y, axis=1)),
-        )
-        sigma_x, sigma_y = (
-            np.atleast_2d(np.cov(x, rowvar=False)),
-            np.atleast_2d(np.cov(y, rowvar=False)),
-        )
-
-        diff = mu_x - mu_y
-        covmean, _ = linalg.sqrtm(sigma_x.dot(sigma_y), disp=False)
-        tr_covmean = np.trace(covmean)
-        return diff.dot(diff) + np.trace(sigma_x) + np.trace(sigma_y) - 2 * tr_covmean
-
-    def get_x_fid(self):
-        all_speaker_style = {}
-        for speaker_id, speaker in enumerate(self.all_speaker):
-            print(f"Processing {speaker}")
-            _dv = []
-            for id_ in range(self.max_uttr_idx):
-                mel = self.get_mel(speaker_id, id_ + 2)[0]
-                # _dv.append(self.judge(mel)[1].squeeze().detach().cpu().numpy())
-                _dv.append(self.judge(mel).squeeze().detach().cpu().numpy())
-            all_speaker_style[speaker] = np.array(_dv)
-        return np.array([all_speaker_style])
-
-    def get_fid_result(self, model, isAdjust=False):
-
-        all_fid = {}
-        for source_speaker_id, source_speaker in enumerate(self.all_speaker):
-            print(f"Processing {source_speaker}")
-            _result = []
-            for target_speaker_id, target_speaker in enumerate(self.all_speaker):
-                _dv = []
-                for sound_id in range(self.max_uttr_idx):
-                    _, _, trans_mel = self.get_trans_mel(
-                        model,
-                        source_speaker_id,
-                        target_speaker_id,
-                        sound_id + 2,
-                        isAdjust,
-                    )
-                    # In Sure the trans mel crop len is 176
-                    trans_mel, _ = self.crop_mel(trans_mel)
-                    trans_style = (
-                        self.judge(trans_mel)[1].squeeze().detach().cpu().numpy()
-                    )
-                    _dv.append(trans_style)
-                _result.append([target_speaker, np.array(_dv)])
-            all_fid[source_speaker] = _result
-
-        return np.array([all_fid])

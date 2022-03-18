@@ -235,7 +235,7 @@ class Config:
         self.lambda_dis = 1
         self.lambda_cycle = 1
         self.n_critic = 10
-        self.batch_size = 1
+        self.batch_size = 2
         self.len_crop = 176
         self.dim_neck = 44
         self.dim_emb = 256
