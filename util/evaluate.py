@@ -94,8 +94,7 @@ class Evaluator:
         _dv = torch.zeros((1, 256))
         for _ in range(self.erroment_uttr_idx):
             mel, _ = self.get_mel(speaker_id, random.randint(2, self.max_uttr_idx))
-            # _dv += self.judge(mel)[1].detach().cpu()
-            _dv += self.judge(mel).detach().cpu()
+            _dv += self.judge(mel)[1].detach().cpu()
         _dv = _dv / (self.erroment_uttr_idx)
         return _dv.to(self.device)
 
@@ -111,8 +110,7 @@ class Evaluator:
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
             mel, _ = self.get_mel(i, random.randint(2, self.max_uttr_idx))
-            # _style = self.judge(mel)[1].detach().cpu()
-            _style = self.judge(mel).detach().cpu()
+            _style = self.judge(mel)[1].detach().cpu()
             for j, data in enumerate(self.all_dv):
                 dv = data.detach().cpu()
                 cos = (
@@ -174,8 +172,7 @@ class Evaluator:
                     _, _, trans_mel = self.get_trans_mel(
                         model, source_id, target_id, sound_id, isAdjust
                     )
-                    # trans_style = self.judge(trans_mel)[1]
-                    trans_style = self.judge(trans_mel)
+                    trans_style = self.judge(trans_mel)[1]
                     _dv_result.append(trans_style)
 
                 for k, emb in enumerate(self.all_dv):
