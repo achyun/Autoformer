@@ -60,6 +60,8 @@ class Evaluator:
         target_id: int,
         sound_id: int,
         isAdjust: bool,
+        isAdain: bool,
+        isPlay = False,
     ):
         mel_source, pad_size_source = self.get_mel(source_id, sound_id)
         mel_target, pad_size_target = self.get_mel(target_id, sound_id)
@@ -74,15 +76,20 @@ class Evaluator:
 
         if isAdjust:
             _, _, mel_trans, _ = model(mel_source, emb_org, emb_trg, True, mel_target)
+        elif isAdain:
+            _, feature = model(mel_source, emb_org, None, None)
+            _, mel_trans, _ = model(mel_source, emb_org, emb_trg, feature)
         else:
             _, mel_trans, _ = model(mel_source, emb_org, emb_trg)
+
         mel_trans = mel_trans.squeeze(1)
 
-        if pad_size_source > 0:
-            mel_source = mel_source[:, : (self.len_crop - pad_size_source), :]
-            mel_trans = mel_trans[:, : (self.len_crop - pad_size_source), :]
-        if pad_size_target > 0:
-            mel_target = mel_target[:, : (self.len_crop - pad_size_target), :]
+        if isPlay:
+            if pad_size_source > 0:
+                mel_source = mel_source[:, : (self.len_crop - pad_size_source), :]
+                mel_trans = mel_trans[:, : (self.len_crop - pad_size_source), :]
+            if pad_size_target > 0:
+                mel_target = mel_target[:, : (self.len_crop - pad_size_target), :]
 
         return mel_source, mel_target, mel_trans
 
@@ -148,7 +155,7 @@ class Evaluator:
 
         return sum(trans) / len(trans), sum(trans_) / len(trans_)
 
-    def generate_result(self, models: list, isAdjust=False):
+    def generate_result(self, models: list, sound_id=2, isAdjust=False, isAdain=False):
         cos_result = []
 
         for _ in range(len(models)):
@@ -158,7 +165,6 @@ class Evaluator:
 
         for source_id, data in enumerate(self.metadata):
             sp_s = data[0]
-            sound_id = random.randint(2, self.max_uttr_idx)
             print(f"Now Processing --- {sp_s}")
             for target_id, data in enumerate(self.metadata):
                 sp_o = data[0]
@@ -170,7 +176,7 @@ class Evaluator:
 
                 for model_id, model in enumerate(models):
                     _, _, trans_mel = self.get_trans_mel(
-                        model, source_id, target_id, sound_id, isAdjust
+                        model, source_id, target_id, sound_id, isAdjust, isAdain
                     )
                     trans_style = self.judge(trans_mel)[1]
                     _dv_result.append(trans_style)
