@@ -154,7 +154,7 @@ class Encoder(nn.Module):
                     dim=-1,
                 )
             )
-        return codes
+        return codes, features
 
 
 class Decoder(nn.Module):
@@ -299,7 +299,7 @@ class MetaConv2(nn.Module):
 
         codes, features = self.encoder(x, c_org)
         if c_trg is None and target_feature is None:
-            return torch.cat(codes, dim=-1)
+            return torch.cat(codes, dim=-1), features
 
         tmp = []
         for code in codes:
