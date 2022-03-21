@@ -1,8 +1,6 @@
 import numpy as np
 import random
-from torch import detach
 import torch.nn as nn
-from scipy import linalg
 from factory import *
 from melgan.interface import *
 
@@ -13,16 +11,18 @@ class Evaluator:
         self.root = config.root
         self.num_speaker = config.num_speaker
         self.batch_size = config.batch_size
-        self.erroment_uttr_idx = config.erroment_uttr_idx
         self.max_uttr_idx = config.max_uttr_idx
+        self.erroment_num = config.erroment_num
         self.len_crop = config.len_crop
         self.device = config.device
         self.all_speaker = config.all_speaker
-        self.judge = config.judge
+        self.embedder = config.embedder
+        self.enrroment_idx = []
+        self.remain_idx = np.arange(2, config.max_uttr_idx)
         self.metadata = self.build_metadata(config.metadata)
 
         self.vocoder = MelVocoder(model_name="model/static/multi_speaker")
-        if self.judge != None:
+        if self.embedder != None:
             print("Detect Judge ! generate all Real Data d-vector")
             self.all_dv = self.generate_real_dv()
 
@@ -61,7 +61,7 @@ class Evaluator:
         sound_id: int,
         isAdjust: bool,
         isAdain: bool,
-        isPlay = False,
+        isPlay=False,
     ):
         mel_source, pad_size_source = self.get_mel(source_id, sound_id)
         mel_target, pad_size_target = self.get_mel(target_id, sound_id)
@@ -99,14 +99,22 @@ class Evaluator:
 
     def get_dv(self, speaker_id):
         _dv = torch.zeros((1, 256))
-        for _ in range(self.erroment_uttr_idx):
-            mel, _ = self.get_mel(speaker_id, random.randint(2, self.max_uttr_idx))
-            _dv += self.judge(mel)[1].detach().cpu()
-        _dv = _dv / (self.erroment_uttr_idx)
+        for enrroment_idx in self.enrroment_idx:
+            mel, _ = self.get_mel(speaker_id, enrroment_idx)
+            _dv += self.embedder(mel)[1].detach().cpu()
+        _dv = _dv / (self.erroment_num)
         return _dv.to(self.device)
 
     def generate_real_dv(self):
         all_dv = []
+        for _ in range(self.erroment_num):
+            # random pick 16 utterence for enrroment
+            enrroment_idx = random.choice(self.remain_idx)
+            self.remain_idx = np.delete(
+                self.remain_idx, np.where(self.remain_idx == enrroment_idx)
+            )
+            self.enrroment_idx.append(enrroment_idx)
+
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
             all_dv.append(self.get_dv(i))
@@ -114,22 +122,33 @@ class Evaluator:
 
     def get_real_data_cos(self):
         cos_result = np.zeros((self.num_speaker, self.num_speaker))
+        var_result = np.zeros((self.num_speaker, self.num_speaker))
         for i, speaker in enumerate(self.all_speaker):
             print(f"Processing --- ID:{i} Speaker:{speaker} ---")
-            mel, _ = self.get_mel(i, random.randint(2, self.max_uttr_idx))
-            _style = self.judge(mel)[1].detach().cpu()
+            tmp_style = []
+            # Generate 52 embed first
+            for sound_id in self.remain_idx:
+                mel, _ = self.get_mel(i, sound_id)
+                tmp_style.append(self.embedder(mel)[1].detach().cpu())
+
+            # Compare with all dv
             for j, data in enumerate(self.all_dv):
-                dv = data.detach().cpu()
-                cos = (
-                    torch.clamp(
-                        nn.functional.cosine_similarity(dv, _style, dim=1, eps=1e-8),
-                        min=0.0,
+                tmp_cos = []
+                for _style in tmp_style:
+                    dv = data.detach().cpu()
+                    tmp_cos.append(
+                        torch.clamp(
+                            nn.functional.cosine_similarity(
+                                dv, _style, dim=1, eps=1e-8
+                            ),
+                            min=0.0,
+                        )
+                        .numpy()[0]
+                        .astype(np.float32)
                     )
-                    .numpy()[0]
-                    .astype(np.float32)
-                )
-                cos_result[i][j] = cos
-        return cos_result
+                cos_result[i][j] = np.array(tmp_cos).mean()
+                var_result[i][j] = np.array(tmp_cos).std()
+        return cos_result, var_result
 
     def get_cos_rc(self, cos_res):
         rc = 0.0
@@ -178,7 +197,7 @@ class Evaluator:
                     _, _, trans_mel = self.get_trans_mel(
                         model, source_id, target_id, sound_id, isAdjust, isAdain
                     )
-                    trans_style = self.judge(trans_mel)[1]
+                    trans_style = self.embedder(trans_mel)[1]
                     _dv_result.append(trans_style)
 
                 for k, emb in enumerate(self.all_dv):

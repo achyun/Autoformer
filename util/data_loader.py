@@ -57,7 +57,7 @@ class Utterances(data.Dataset):
                 else:  # load the mel-spectrograms
                     tmp = tmp.replace("\\", "/")
                     uttrs[j] = np.load(f"{self.root_dir}/{tmp}")
-                    
+
             dataset[idx_offset + k] = uttrs
 
     def __getitem__(self, index):
