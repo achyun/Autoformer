@@ -40,6 +40,7 @@ class Solver(object):
         self.batch_size = config.batch_size
         self.num_iters = config.num_iters
         self.pretrained_step = config.pretrained_step
+        self.use_adain = config.use_adain
         self.pretrained_embedder_path = "model/static/metadv_vctk80.pth"
 
         # Miscellaneous.
@@ -123,7 +124,10 @@ class Solver(object):
             x_identic, x_identic_psnt, code_real = self.VC(
                 x_source, org_style, org_style
             )
-            code_reconst = self.VC(x_identic_psnt, org_style, None)
+            if self.use_adain:
+                code_reconst, _ = self.VC(x_identic_psnt, org_style, None)
+            else:
+                code_reconst = self.VC(x_identic_psnt, org_style, None)
             # Identity mapping loss
             vc_loss_id = F.mse_loss(x_source, x_identic.squeeze())
             vc_loss_id_psnt = F.mse_loss(x_source, x_identic_psnt.squeeze())
@@ -133,11 +137,27 @@ class Solver(object):
 
             if (i + 1) % self.n_critic == 0 and (i + 1) > self.pretrained_step:
                 x_target, target_style = self.get_data()
-                _, x_identic_psnt, _ = self.VC(x_source, org_style, target_style)
-                # Cycle Reconstruct, Target to Source domain
-                _, x_reconstruct, _ = self.VC(
-                    x_identic_psnt.squeeze(), target_style, org_style
-                )
+
+                if self.use_adain:
+                    _, target_feature = self.VC(x_identic_psnt, target_style, None)
+                    _, x_identic_psnt, _ = self.VC(
+                        x_source, org_style, target_style, target_feature
+                    )
+                    # Cycle Reconstruct, Target to Source domain
+                    _, source_feature = self.VC(x_source, org_style, None)
+                    _, x_reconstruct, _ = self.VC(
+                        x_identic_psnt.squeeze(),
+                        target_style,
+                        org_style,
+                        source_feature,
+                    )
+
+                else:
+                    _, x_identic_psnt, _ = self.VC(x_source, org_style, target_style)
+                    # Cycle Reconstruct, Target to Source domain
+                    _, x_reconstruct, _ = self.VC(
+                        x_identic_psnt.squeeze(), target_style, org_style
+                    )
 
                 # 抽出 style
                 _, trans_style = self.C(x_identic_psnt.squeeze())
@@ -224,11 +244,12 @@ class Solver(object):
 
 
 class Config:
-    def __init__(self, model_name, data_dir, num_iters):
+    def __init__(self, model_name, data_dir, use_adain, num_iters):
         self.model_name = model_name
         self.data_dir = data_dir
         self.num_iters = num_iters
         self.pretrained_step = int(num_iters / 10)
+        self.use_adain = use_adain
         self.num_speaker = 80
         self.lambda_cd = 1
         self.lambda_cls = 0.1
@@ -249,10 +270,13 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", help="traning model name")
     parser.add_argument("--data_dir", help="traning data folder")
     parser.add_argument("--save_model_name")
+    parser.add_argument("--use_adain", default=False)
     parser.add_argument("--num_iters", default=10, help="iter time")
     args = parser.parse_args()
 
-    config = Config(args.model_name, args.data_dir, int(args.num_iters))
+    config = Config(
+        args.model_name, args.data_dir, bool(args.use_adain), int(args.num_iters)
+    )
 
     print(" --- Use Config  ---")
     print(f" Lambda cd ---  {config.lambda_cd}")
@@ -260,6 +284,7 @@ if __name__ == "__main__":
     print(f" Lambda dis--- {config.lambda_dis}")
     print(f" Lambda cycle --- {config.lambda_cycle}")
     print(f" N critic --- {config.n_critic }")
+    print(f" Use Adain --- {config.use_adain }")
     print(f" VC Pretrained step  --- {config.pretrained_step  }")
     print(" ----------------------")
 
